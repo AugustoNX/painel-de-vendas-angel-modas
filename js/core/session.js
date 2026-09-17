@@ -132,21 +132,34 @@ export function resetPassword(email) {
   return sendPasswordResetEmail(auth, email.trim());
 }
 
+/** Senha descartável de quem vai definir a própria pelo link enviado por email. */
+function randomPassword() {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return 'Aa1!' + [...bytes].map(b => b.toString(36)).join('').slice(0, 14);
+}
+
 /**
  * Cria a conta de acesso de alguém da equipe. Só o admin chama isso: a conta
  * nasce no Firebase Auth e o perfil (nível de acesso) é gravado em /users.
+ *
+ * Com `sendSetupEmail`, a senha inicial é aleatória e descartada — a pessoa
+ * recebe um link por email e escolhe a própria senha, então ninguém além dela
+ * conhece a credencial.
  */
-export async function createAccount({ email, password, role, vendorId, name }) {
+export async function createAccount({ email, password, role, vendorId, name, sendSetupEmail = false }) {
+  const address = email.trim();
+  const initialPassword = sendSetupEmail ? randomPassword() : password;
+
   const uid = await withSecondaryApp(async secondary => {
     const secondaryAuth = getAuth(secondary);
-    const cred = await createUserWithEmailAndPassword(secondaryAuth, email.trim(), password);
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, address, initialPassword);
     await fbSignOut(secondaryAuth).catch(() => {});
     return cred.user.uid;
   });
 
   await writeAt(`${DB_PATHS.users}/${uid}`, {
-    email: email.trim(),
-    name: name || email.split('@')[0],
+    email: address,
+    name: name || address.split('@')[0],
     role,
     vendorId: role === ROLE.VENDEDORA ? vendorId : null,
     active: true,
@@ -154,7 +167,19 @@ export async function createAccount({ email, password, role, vendorId, name }) {
     createdBy: session.uid
   });
 
-  return uid;
+  // A conta já existe e funciona mesmo se o email falhar, então o erro aqui não
+  // pode derrubar a criação — o admin reenvia o link pela tela de acessos.
+  let emailSent = false;
+  if (sendSetupEmail) {
+    try {
+      await sendPasswordResetEmail(auth, address);
+      emailSent = true;
+    } catch (err) {
+      console.error('Não consegui enviar o email de definição de senha', err);
+    }
+  }
+
+  return { uid, emailSent };
 }
 
 export function updateAccount(uid, patch) {

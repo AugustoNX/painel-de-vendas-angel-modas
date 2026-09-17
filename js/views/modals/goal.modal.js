@@ -3,11 +3,10 @@ import { MONTH_NAMES, TIER_ORDER, TIER_LABEL, RATES } from '../../config/constan
 import { openModal, confirmModal } from '../../ui/modal.js';
 import { showToast } from '../../ui/toast.js';
 import { money, esc } from '../../ui/format.js';
+import { displayMasked, readNumber, setMasked } from '../../ui/mask.js';
 import { metaVendors, suggestTiers, goalFor } from '../../domain/metas.js';
 import { monthWeeks, splitByWeek } from '../../domain/weeks.js';
 import { saveGoal, deleteGoal } from '../../data/goals.repo.js';
-
-const numberOrNull = value => (value === '' || value === null || isNaN(Number(value)) ? null : Number(value));
 
 export function openGoalModal(year, monthIdx) {
   const key = `${year}-${String(monthIdx + 1).padStart(2, '0')}`;
@@ -22,16 +21,16 @@ export function openGoalModal(year, monthIdx) {
       <div class="goal-row">
         <div class="field">
           <label for="goalObj">Objetivo total da loja (R$)</label>
-          <input id="goalObj" type="number" step="0.01" min="0" value="${existing?.obj ?? ''}" placeholder="0,00">
+          <input id="goalObj" type="text" inputmode="decimal" autocomplete="off" data-mask="money" maxlength="18" value="${displayMasked('money', existing?.obj)}" placeholder="0,00">
         </div>
         <div class="field">
           <label for="goalCampanha">Campanha não comissionável (R$)</label>
-          <input id="goalCampanha" type="number" step="0.01" min="0" value="${existing?.campanhaAlvo ?? 0}" placeholder="0,00">
+          <input id="goalCampanha" type="text" inputmode="decimal" autocomplete="off" data-mask="money" maxlength="18" value="${displayMasked('money', existing?.campanhaAlvo ?? 0)}" placeholder="0,00">
           <span class="field-hint">Ex.: liquidação. Sai da base que vira meta das vendedoras.</span>
         </div>
         <div class="field">
           <label for="goalPreco">Preço médio por peça (R$)</label>
-          <input id="goalPreco" type="number" step="0.01" min="0" value="${existing?.precoMedioPeca ?? ''}" placeholder="0,00">
+          <input id="goalPreco" type="text" inputmode="decimal" autocomplete="off" data-mask="money" maxlength="18" value="${displayMasked('money', existing?.precoMedioPeca)}" placeholder="0,00">
           <span class="field-hint">Converte as metas em peças no balizador.</span>
         </div>
       </div>
@@ -55,7 +54,7 @@ export function openGoalModal(year, monthIdx) {
         <div class="tier-inputs">
           ${TIER_ORDER.map(tier => `<div class="field tier-input" style="border-top-color:var(--${tier})">
             <label for="goalTier-${tier}">${TIER_LABEL[tier]} · ${(RATES[tier] * 100).toFixed(1)}%</label>
-            <input id="goalTier-${tier}" type="number" step="0.01" min="0" value="${existing?.niveis?.[tier] ?? ''}" placeholder="deixe vazio se não valer">
+            <input id="goalTier-${tier}" type="text" inputmode="decimal" autocomplete="off" data-mask="money" maxlength="18" value="${displayMasked('money', existing?.niveis?.[tier])}" placeholder="deixe vazio se não valer">
           </div>`).join('')}
         </div>
         <div class="field-hint">Deixar em branco significa que o nível não existe no mês (foi o caso de Setembro sem Diamante).</div>
@@ -117,18 +116,18 @@ export function openGoalModal(year, monthIdx) {
         });
         TIER_ORDER.forEach(tier => {
           const input = overlay.querySelector(`#goalTier-${tier}`);
-          if (suggested[tier] !== null) input.value = suggested[tier];
+          if (suggested[tier] !== null) setMasked(input, suggested[tier]);
         });
         refresh();
         showToast('Faixas sugeridas — ajuste o que precisar');
       });
 
       overlay.querySelector('#goalCopyBtn')?.addEventListener('click', () => {
-        overlay.querySelector('#goalObj').value = previous.goal.obj ?? '';
-        overlay.querySelector('#goalCampanha').value = previous.goal.campanhaAlvo ?? 0;
-        overlay.querySelector('#goalPreco').value = previous.goal.precoMedioPeca ?? '';
+        setMasked(overlay.querySelector('#goalObj'), previous.goal.obj);
+        setMasked(overlay.querySelector('#goalCampanha'), previous.goal.campanhaAlvo ?? 0);
+        setMasked(overlay.querySelector('#goalPreco'), previous.goal.precoMedioPeca);
         TIER_ORDER.forEach(tier => {
-          overlay.querySelector(`#goalTier-${tier}`).value = previous.goal.niveis?.[tier] ?? '';
+          setMasked(overlay.querySelector(`#goalTier-${tier}`), previous.goal.niveis?.[tier]);
         });
         refresh();
         showToast(`Valores copiados de ${previous.label}`);
@@ -142,12 +141,12 @@ export function openGoalModal(year, monthIdx) {
   function readForm() {
     const pick = id => overlayRef.querySelector(id);
     return {
-      obj: numberOrNull(pick('#goalObj').value) || 0,
-      campanhaAlvo: numberOrNull(pick('#goalCampanha').value) || 0,
-      precoMedioPeca: numberOrNull(pick('#goalPreco').value) || 0,
+      obj: readNumber(pick('#goalObj')) || 0,
+      campanhaAlvo: readNumber(pick('#goalCampanha')) || 0,
+      precoMedioPeca: readNumber(pick('#goalPreco')) || 0,
       vendorIds: [...overlayRef.querySelectorAll('.goal-vendor:checked')].map(input => input.value),
       niveis: TIER_ORDER.reduce((acc, tier) => {
-        acc[tier] = numberOrNull(pick(`#goalTier-${tier}`).value);
+        acc[tier] = readNumber(pick(`#goalTier-${tier}`));
         return acc;
       }, {})
     };
@@ -164,15 +163,15 @@ function previousGoal(year, monthIdx) {
 /** Mostra, enquanto o admin digita, o que cada número vai virar no painel. */
 function renderPreview(overlay, year, monthIdx) {
   const pick = id => overlay.querySelector(id);
-  const obj = numberOrNull(pick('#goalObj').value) || 0;
-  const campanha = numberOrNull(pick('#goalCampanha').value) || 0;
-  const preco = numberOrNull(pick('#goalPreco').value) || 0;
+  const obj = readNumber(pick('#goalObj')) || 0;
+  const campanha = readNumber(pick('#goalCampanha')) || 0;
+  const preco = readNumber(pick('#goalPreco')) || 0;
   const vendorCount = overlay.querySelectorAll('.goal-vendor:checked').length;
   const weeks = monthWeeks(year, monthIdx);
 
   const base = Math.max(obj - campanha, 0);
   const rows = TIER_ORDER.map(tier => {
-    const value = numberOrNull(pick(`#goalTier-${tier}`).value);
+    const value = readNumber(pick(`#goalTier-${tier}`));
     if (value === null) return `<tr class="off"><td>${TIER_LABEL[tier]}</td><td colspan="3">não vale neste mês</td></tr>`;
     const perWeek = splitByWeek(value, weeks);
     return `<tr>

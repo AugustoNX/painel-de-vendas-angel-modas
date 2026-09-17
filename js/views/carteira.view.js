@@ -5,6 +5,7 @@ import { onClick, onInput } from '../ui/actions.js';
 import { showToast } from '../ui/toast.js';
 import { confirmModal } from '../ui/modal.js';
 import { money, esc, dateBr } from '../ui/format.js';
+import { displayMasked } from '../ui/mask.js';
 import { stackedBar } from '../ui/charts.js';
 import { metaVendors, vendorName } from '../domain/metas.js';
 import {
@@ -93,7 +94,7 @@ function tasksCard(clients) {
       <div>
         <span class="tr-name">${esc(client.name)}</span>
         <span class="status-badge status-${status.key}">${status.badge}</span>
-        <div class="tr-meta">${status.days} dias sem comprar · ${money(clientTotal(client.id))} em histórico${isAdmin() ? ' · ' + esc(vendorName(client.ownerVendorId)) : ''}${client.phone ? ' · ' + esc(client.phone) : ''}</div>
+        <div class="tr-meta">${status.days} dias sem comprar · ${money(clientTotal(client.id))} em histórico${isAdmin() ? ' · ' + esc(vendorName(client.ownerVendorId)) : ''}${client.phone ? ' · ' + esc(displayMasked('phone', client.phone)) : ''}</div>
       </div>
       <div class="task-actions">
         ${client.phone ? `<a class="task-btn ghost" target="_blank" rel="noopener"
@@ -119,7 +120,7 @@ function attentionCard(clients) {
       <div>
         <span class="ar-name">${esc(client.name)}</span>
         <span class="status-badge status-${status.key}">${status.badge}</span>
-        <div class="ar-meta">${status.days} dias sem comprar${isAdmin() ? ' · carteira de ' + esc(vendorName(client.ownerVendorId)) : ''}${client.phone ? ' · ' + esc(client.phone) : ''}</div>
+        <div class="ar-meta">${status.days} dias sem comprar${isAdmin() ? ' · carteira de ' + esc(vendorName(client.ownerVendorId)) : ''}${client.phone ? ' · ' + esc(displayMasked('phone', client.phone)) : ''}</div>
       </div>
       <div class="ar-action">${status.action}</div>
     </div>`).join('')}
@@ -214,8 +215,11 @@ function portfolios(vendors, terciles) {
   return '<div class="vaccordion" id="crmPortfolios">' + vendors.map(vendor => {
     let clients = clientsOf(vendor.id);
     if (term) {
+      const phoneDigits = term.replace(/\D/g, '');
       clients = clients.filter(client =>
-        (client.name || '').toLowerCase().includes(term) || (client.phone || '').toLowerCase().includes(term));
+        (client.name || '').toLowerCase().includes(term)
+        || (client.phone || '').toLowerCase().includes(term)
+        || (phoneDigits && String(client.phone || '').replace(/\D/g, '').includes(phoneDigits)));
     }
 
     const health = portfolioHealth(vendor.id);
@@ -250,7 +254,7 @@ function clientRow(client, terciles) {
         <span class="status-badge status-${status.key}">${status.badge}</span>
         <span class="status-badge" style="background:${segment.color}">${esc(segment.label)}</span>
         ${client.lastReactivation ? '<span title="Reativada">🎉</span>' : ''}
-        <span class="client-sub">${esc(client.phone || 'sem telefone')}${last ? ` · última compra ${dateBr(last.date)} (${status.days} dias)` : ''}</span>
+        <span class="client-sub">${esc(client.phone ? displayMasked('phone', client.phone) : 'sem telefone')}${last ? ` · última compra ${dateBr(last.date)} (${status.days} dias)` : ''}</span>
       </div>
       <div class="client-right"><span class="client-total">${money(clientTotal(client.id))}</span><span class="chevron">▶</span></div>
     </button>`;

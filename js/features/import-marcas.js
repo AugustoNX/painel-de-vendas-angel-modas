@@ -3,6 +3,7 @@ import { COLECOES } from '../config/constants.js';
 import { openModal, selectField, field } from '../ui/modal.js';
 import { showToast } from '../ui/toast.js';
 import { money, esc } from '../ui/format.js';
+import { readNumber } from '../ui/mask.js';
 import { extractPdfText } from './pdf-reader.js';
 import { parseBrandSalesReport } from './report-parser.js';
 import { createBrandSale } from '../data/stock.repo.js';
@@ -17,7 +18,7 @@ export function openBrandSalesModal() {
     body: `
       <div class="goal-row">
         ${selectField({ id: 'brandColecao', label: 'Coleção destas vendas', options: COLECOES.map(c => ({ value: c, label: c })), value: 'Verão' })}
-        ${field({ id: 'brandAno', label: 'Ano', type: 'number', value: new Date().getFullYear(), attrs: 'min="2020" max="2100"' })}
+        ${field({ id: 'brandAno', label: 'Ano', mask: 'year', value: new Date().getFullYear() })}
       </div>
       <div class="field"><input type="file" id="brandFile" accept="application/pdf"></div>
       <div id="brandStatus" class="import-status"></div>
@@ -32,7 +33,7 @@ export function openBrandSalesModal() {
           if (!recognized.length) { showToast('Nenhum produto com marca cadastrada foi reconhecido'); return false; }
 
           const colecao = body.querySelector('#brandColecao').value;
-          const ano = Number(body.querySelector('#brandAno').value);
+          const ano = readNumber(body.querySelector('#brandAno'));
 
           const byMarca = new Map();
           recognized.forEach(row => {

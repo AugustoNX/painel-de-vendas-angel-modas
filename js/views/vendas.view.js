@@ -6,12 +6,14 @@ import { onClick, onInput, onChange } from '../ui/actions.js';
 import { showToast } from '../ui/toast.js';
 import { confirmModal } from '../ui/modal.js';
 import { money, moneyRound, pecas, fmt, esc, dateBr, todayIso, dayMonth } from '../ui/format.js';
+import { displayMasked, maskAttrs, parseDateBr, readNumber } from '../ui/mask.js';
 import { lineChart, barChart } from '../ui/charts.js';
 import {
   goalVendors, extraVendors, vendorById, vendorName, vendorTotal, vendorPecas, vendorWeekTotal,
   salesOf, currentTier, nextTierInfo, topTierTarget, tierBonus, vendorBonus, availableTiers,
   storeSummary, currentWeeks, weeklyTargets, monthPecasTarget, isMonthOpen, monthOpensAt,
-  goalFor, knownYears, cumulativeByDay, idealCumulativeByDay, cutAtToday, daysInMonth
+  goalFor, knownYears, cumulativeByDay, idealCumulativeByDay, cutAtToday, daysInMonth,
+  lastSaleDate, daysWithoutSelling, sellingDays, averagePerSellingDay, daysLeftInMonth
 } from '../domain/metas.js';
 import { addSale, deleteSale } from '../data/sales.repo.js';
 import { patchGoal } from '../data/goals.repo.js';
@@ -31,7 +33,13 @@ export function renderVendas() {
     return;
   }
 
-  html += isAdmin() ? storeCard(goal) + evolutionCard(goal) + rankingCard(goal) : vendorHeroCard(goal);
+  if (isAdmin()) {
+    html += storeCard(goal) + evolutionCard(goal) + rankingCard(goal) + idleCard(goal);
+  } else {
+    // A vendedora abre o painel para lançar: o formulário vem antes da análise.
+    html += vendorHeroCard(goal) + entryCard(goal);
+  }
+
   html += tierGoalsCard(goal);
   html += pacerCard(goal);
   html += vendorsAccordion(goal);
@@ -121,8 +129,8 @@ function storeCard(goal) {
     if (Number(goal.campanhaAlvo) > 0) {
       html += `<div class="campaign-box">
         <label for="campanhaInput">Campanha não comissionável — meta ${money(goal.campanhaAlvo)}</label>
-        <input id="campanhaInput" type="number" step="0.01" min="0" value="${goal.campanhaRealizado ?? ''}"
-          placeholder="0,00" data-change-action="saveCampanha">
+        <input id="campanhaInput" type="text" value="${displayMasked('money', goal.campanhaRealizado)}"
+          placeholder="0,00" ${maskAttrs('money')} data-change-action="saveCampanha">
         <div class="campaign-note">Entra no faturamento da loja, mas não soma para nenhuma vendedora nem para a base de bonificação.</div>
       </div>`;
     }
@@ -155,17 +163,57 @@ function vendorHeroCard(goal) {
   const tier = currentTier(goal, total);
   const next = nextTierInfo(goal, total);
   const bonus = tierBonus(goal, tier);
+  const pecasVendidas = vendorPecas(vendorId);
 
   return `<div class="card store-card">
     <div class="store-card-header"><h2>${esc(vendor.name)} — ${MONTH_NAMES[state.month]}/${state.year}</h2></div>
     <div class="kpi-grid">
       ${kpi('Você vendeu', money(total), 'big')}
-      ${kpi('Peças', pecas(vendorPecas(vendorId)))}
+      ${kpi('Peças', pecas(pecasVendidas))}
       ${kpi('Nível atual', tier ? TIER_LABEL[tier] : 'Abaixo do Bronze')}
       ${kpi(next ? `Falta para ${TIER_LABEL[next.tier]}` : 'Nível máximo', next ? money(next.falta) : '🎉', next ? 'missing' : 'done')}
       ${kpi('Bonificação garantida', money(bonus), 'done')}
     </div>
+    ${idleStrip(vendorId, next)}
+    <div class="kpi-grid">
+      ${kpi('Ticket médio por peça', pecasVendidas > 0 ? money(total / pecasVendidas) : '—')}
+      ${kpi('Dias com venda no mês', `${sellingDays(vendorId)} de ${daysInMonth()}`)}
+      ${kpi('Média por dia vendido', money(averagePerSellingDay(vendorId)))}
+    </div>
     ${evolutionChart(goal, [vendorId], next ? next.alvo : topTierTarget(goal), next ? `Ritmo para ${TIER_LABEL[next.tier]}` : 'Ritmo do nível máximo')}
+  </div>`;
+}
+
+/**
+ * Faixa de "tempo sem vender": é o aviso mais acionável do painel, então fica
+ * destacado e junto do quanto ainda precisa sair por dia até o fim do mês.
+ */
+function idleStrip(vendorId, next) {
+  const idle = daysWithoutSelling(vendorId);
+  const last = lastSaleDate(vendorId);
+  const left = daysLeftInMonth();
+
+  let tone = 'ok';
+  let headline;
+  if (idle === null) {
+    tone = 'warn';
+    headline = 'Nenhuma venda lançada neste mês ainda';
+  } else if (idle === 0) {
+    headline = 'Você vendeu hoje 🎉';
+  } else {
+    if (idle >= 3) tone = 'warn';
+    headline = `${idle} dia${idle === 1 ? '' : 's'} sem vender`;
+  }
+
+  const perDay = next && left > 0
+    ? `Para chegar no ${TIER_LABEL[next.tier]} faltam <b>${money(next.falta / left)}</b> por dia nos ${left} dia${left === 1 ? '' : 's'} restantes.`
+    : next
+      ? `Faltam <b>${money(next.falta)}</b> para o ${TIER_LABEL[next.tier]}.`
+      : 'Você já está no nível máximo do mês.';
+
+  return `<div class="idle-strip idle-${tone}">
+    <div class="idle-main">${headline}</div>
+    <div class="idle-sub">${last ? `Última venda em ${dateBr(last)}. ` : ''}${perDay}</div>
   </div>`;
 }
 
@@ -214,6 +262,33 @@ function rankingCard(goal) {
     <h2>Ranking da equipe</h2>
     <p class="pacer-note">A marca na barra é a meta do Bronze — primeira faixa que gera bonificação.</p>
     ${barChart({ items })}
+  </div>`;
+}
+
+/** Quem parou de vender: o admin precisa ver isso antes do fim do mês. */
+function idleCard(goal) {
+  const rows = goalVendors(goal)
+    .map(vendor => ({ vendor, idle: daysWithoutSelling(vendor.id), last: lastSaleDate(vendor.id) }))
+    .filter(row => row.idle === null || row.idle >= 3)
+    .sort((a, b) => (b.idle ?? Infinity) - (a.idle ?? Infinity));
+
+  if (!rows.length) {
+    return `<div class="card attention-card success">
+      <h2>Ninguém parada</h2>
+      <p class="pacer-note">Todas as vendedoras da escala venderam nos últimos dois dias.</p>
+    </div>`;
+  }
+
+  return `<div class="card attention-card">
+    <h2>Tempo sem vender</h2>
+    <p class="pacer-note">Vendedoras da escala sem nenhuma venda lançada há três dias ou mais.</p>
+    ${rows.map(({ vendor, idle, last }) => `<div class="attention-row">
+      <div>
+        <div class="ar-name">${esc(vendor.name)}</div>
+        <div class="ar-meta">${last ? `última venda em ${dateBr(last)}` : 'nenhuma venda neste mês'} · ${money(vendorTotal(vendor.id))} no mês</div>
+      </div>
+      <div class="ar-action">${idle === null ? '—' : `<b>${idle}</b> dias`}</div>
+    </div>`).join('')}
   </div>`;
 }
 
@@ -353,7 +428,7 @@ function vendorItem(goal, vendor) {
       <span class="vaccordion-hint">${money(total)} ${tier ? `<span class="tier-dot tier-mark-${tier}"></span>` : ''}<span class="chevron">▶</span></span>
     </button>
     ${isOpen ? `<div class="vaccordion-body">
-      <div class="vtotal">Vendido no mês: <b>${money(total)}</b> · ${pecas(vendorPecas(vendor.id))}</div>
+      <div class="vtotal">Vendido no mês: <b>${money(total)}</b> · ${pecas(vendorPecas(vendor.id))} · ${idleLabel(vendor.id)}</div>
       <div class="tier-track">
         <div class="tier-fill" style="width:${Math.min((total / top) * 100, 100)}%"></div>
         <div class="tier-marks">${marks}</div>
@@ -369,6 +444,13 @@ function vendorItem(goal, vendor) {
       ${salesTable(vendor.id)}
     </div>` : ''}
   </div>`;
+}
+
+function idleLabel(vendorId) {
+  const idle = daysWithoutSelling(vendorId);
+  if (idle === null) return '<span class="idle-tag warn">sem vendas no mês</span>';
+  if (idle === 0) return '<span class="idle-tag">vendeu hoje</span>';
+  return `<span class="idle-tag${idle >= 3 ? ' warn' : ''}">${idle} dia${idle === 1 ? '' : 's'} sem vender</span>`;
 }
 
 function vendorPacer(goal, vendorId) {
@@ -413,12 +495,16 @@ function salesTable(vendorId) {
   const sales = salesOf(vendorId).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   if (!sales.length) return '<div class="mini-title">Vendas lançadas</div><div class="empty-state">Nenhum lançamento ainda.</div>';
 
+  // A vendedora corrige o que ela mesma digitou, mas não apaga o que veio do
+  // relatório do ERP — as regras do banco recusam esse caso de qualquer forma.
+  const canDelete = sale => isAdmin() || (vendorId === myVendorId() && sale.source !== 'import');
+
   const rows = sales.map(sale => `<tr>
     <td>${dateBr(sale.date)}</td>
     <td>${money(sale.amount)}</td>
     <td>${sale.pecas ? pecas(sale.pecas) : '—'}</td>
     <td>${sale.source === 'import' ? '<span class="src-tag">PDF</span>' : ''}</td>
-    <td>${isAdmin() ? `<button class="del-btn" data-action="deleteSale" data-sale-id="${sale.id}">remover</button>` : ''}</td>
+    <td>${canDelete(sale) ? `<button class="del-btn" data-action="deleteSale" data-sale-id="${sale.id}">remover</button>` : ''}</td>
   </tr>`).join('');
 
   return `<div class="mini-title">Vendas lançadas</div>
@@ -442,26 +528,38 @@ function extraVendorItem(vendor) {
 }
 
 /* ------------------------------------------------------------------ */
-/* lançamento de vendas (admin)                                        */
+/* lançamento de vendas                                                */
 /* ------------------------------------------------------------------ */
 
+/**
+ * O admin lança para qualquer uma; a vendedora lança só para si — o seletor some
+ * e o vendorId sai direto do vínculo da conta, que é o mesmo que as regras do
+ * banco exigem na gravação.
+ */
 function entryCard(goal) {
-  const options = [...goalVendors(goal), ...extraVendors()]
-    .map(vendor => `<option value="${vendor.id}">${esc(vendor.name)}${vendor.isExtra ? ' (apoio)' : ''}</option>`)
-    .join('');
+  if (isVendedora() && !vendorById(myVendorId())) return '';
+
+  const vendorPicker = isAdmin()
+    ? `<div class="field"><label for="inpVendor">Vendedora</label>
+        <select id="inpVendor">${[...goalVendors(goal), ...extraVendors()]
+          .map(vendor => `<option value="${vendor.id}">${esc(vendor.name)}${vendor.isExtra ? ' (apoio)' : ''}</option>`)
+          .join('')}</select></div>`
+    : '';
 
   return `<div class="card entry-card">
     <div class="store-card-header">
-      <h2>Lançar venda do dia</h2>
-      <button class="crm-add-btn" data-action="openImportSales">📄 Importar relatório (PDF)</button>
+      <h2>${isAdmin() ? 'Lançar venda do dia' : 'Lançar a sua venda'}</h2>
+      ${isAdmin() ? '<button class="crm-add-btn" data-action="openImportSales">📄 Importar relatório (PDF)</button>' : ''}
     </div>
+    ${isAdmin() ? '' : '<p class="pacer-note">Lance a sua venda assim que fechar o atendimento. O valor entra na hora na sua meta e no total da loja.</p>'}
     <div class="entry-form">
-      <div class="field"><label for="inpDate">Data</label><input id="inpDate" type="date" value="${todayIso()}"></div>
-      <div class="field"><label for="inpVendor">Vendedora</label><select id="inpVendor">${options}</select></div>
+      <div class="field"><label for="inpDate">Data</label>
+        <input id="inpDate" type="text" value="${displayMasked('date', todayIso())}" placeholder="00/00/0000" ${maskAttrs('date')}></div>
+      ${vendorPicker}
       <div class="field grow"><label for="inpAmount">Valor vendido (R$)</label>
-        <input id="inpAmount" type="number" step="0.01" min="0" placeholder="0,00" data-enter-action="addSale"></div>
+        <input id="inpAmount" type="text" placeholder="0,00" ${maskAttrs('money')} data-enter-action="addSale"></div>
       <div class="field"><label for="inpPecas">Peças</label>
-        <input id="inpPecas" type="number" step="1" min="0" placeholder="0" data-enter-action="addSale"></div>
+        <input id="inpPecas" type="text" placeholder="0" ${maskAttrs('integer')} data-enter-action="addSale"></div>
       <button class="add-btn" data-action="addSale">Adicionar</button>
     </div>
   </div>`;
@@ -529,8 +627,8 @@ onClick({
   },
 
   async addSale() {
-    const date = val('inpDate');
-    const vendorId = val('inpVendor');
+    const date = parseDateBr(val('inpDate'));
+    const vendorId = isAdmin() ? val('inpVendor') : myVendorId();
     const amount = num('inpAmount');
     const qtd = num('inpPecas') ?? 0;
 
@@ -547,7 +645,9 @@ onClick({
     $('inpAmount').value = '';
     $('inpPecas').value = '';
     $('inpAmount').focus();
-    showToast(`Venda de ${money(amount)} lançada para ${vendorName(vendorId)}`);
+    showToast(isAdmin()
+      ? `Venda de ${money(amount)} lançada para ${vendorName(vendorId)}`
+      : `Venda de ${money(amount)} lançada 🎉`);
   },
 
   deleteSale({ saleId }) {
@@ -565,7 +665,7 @@ onClick({
 
 onChange({
   async saveCampanha(_data, el) {
-    await patchGoal(periodKey(), { campanhaRealizado: Number(el.value) || 0 });
+    await patchGoal(periodKey(), { campanhaRealizado: readNumber(el) || 0 });
     showToast('Campanha atualizada');
   }
 });

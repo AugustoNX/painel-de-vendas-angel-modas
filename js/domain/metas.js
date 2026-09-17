@@ -56,6 +56,53 @@ export function vendorWeekTotal(vendorId, week) {
     .reduce((sum, sale) => sum + Number(sale.amount || 0), 0);
 }
 
+/** Data da venda mais recente no mês em exibição. */
+export function lastSaleDate(vendorId) {
+  return salesOf(vendorId)
+    .map(sale => sale.date)
+    .filter(Boolean)
+    .sort()
+    .pop() || null;
+}
+
+/**
+ * O dia até onde faz sentido contar. Num mês já fechado a referência é o último
+ * dia dele, senão todo mês antigo apareceria como "300 dias sem vender".
+ */
+function referenceDay() {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const monthEnd = new Date(state.year, state.month + 1, 0);
+  return today < monthEnd ? today : monthEnd;
+}
+
+/** Dias corridos desde a última venda. `null` quando não vendeu nada no mês. */
+export function daysWithoutSelling(vendorId) {
+  const last = lastSaleDate(vendorId);
+  if (!last) return null;
+  const [year, month, day] = last.split('-').map(Number);
+  const diff = referenceDay() - new Date(year, month - 1, day);
+  return Math.max(0, Math.round(diff / 86400000));
+}
+
+/** Quantos dias diferentes do mês tiveram venda. */
+export function sellingDays(vendorId) {
+  return new Set(salesOf(vendorId).map(sale => sale.date).filter(Boolean)).size;
+}
+
+/** Média por dia efetivamente trabalhado, não por dia do calendário. */
+export function averagePerSellingDay(vendorId) {
+  const days = sellingDays(vendorId);
+  return days ? vendorTotal(vendorId) / days : 0;
+}
+
+/** Dias que ainda restam no mês em exibição, contando hoje. */
+export function daysLeftInMonth() {
+  const now = new Date();
+  if (now.getFullYear() !== state.year || now.getMonth() !== state.month) return 0;
+  return daysInMonth() - now.getDate() + 1;
+}
+
 export function teamTotal(goal) {
   return goalVendors(goal).reduce((sum, vendor) => sum + vendorTotal(vendor.id), 0);
 }

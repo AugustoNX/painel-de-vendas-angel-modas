@@ -13,7 +13,7 @@ import { updateVendor } from '../data/vendors.repo.js';
 import { revokeUser } from '../data/users.repo.js';
 import { listSales } from '../data/sales.repo.js';
 import { openVendorModal } from './modals/vendor.modal.js';
-import { openCreateUserModal, openEditUserModal } from './modals/user.modal.js';
+import { openCreateUserModal, openEditUserModal, openSendPasswordLink } from './modals/user.modal.js';
 
 // Cache da análise anual: ela lê todos os meses do ano, então só roda sob demanda.
 let yearAnalysis = null;
@@ -38,7 +38,9 @@ function vendorsSection() {
         <td><b>${esc(vendor.name)}</b></td>
         <td>${vendor.isExtra ? '<span class="chip">Apoio</span>' : '<span class="chip chip-accent">Com meta</span>'}</td>
         <td>${vendor.active === false ? '<span class="chip chip-off">Inativa</span>' : '<span class="chip chip-ok">Ativa</span>'}</td>
-        <td>${account ? esc(account.email) : '<span class="muted-text">sem acesso vinculado</span>'}</td>
+        <td>${account
+          ? esc(account.email)
+          : '<button class="ghost-btn" data-action="newUser">Criar acesso</button>'}</td>
         <td class="row-actions">
           <button class="ghost-btn" data-action="editVendor" data-vendor-id="${vendor.id}">Editar</button>
           <button class="ghost-btn" data-action="toggleVendorActive" data-vendor-id="${vendor.id}">
@@ -73,6 +75,7 @@ function usersSection() {
     <td>${user.vendorId ? esc(vendorName(user.vendorId)) : '—'}</td>
     <td>${user.active === false ? '<span class="chip chip-off">Bloqueado</span>' : '<span class="chip chip-ok">Liberado</span>'}</td>
     <td class="row-actions">
+      <button class="ghost-btn" data-action="sendPasswordLink" data-uid="${user.id}">Enviar link de senha</button>
       <button class="ghost-btn" data-action="editUser" data-uid="${user.id}">Editar</button>
       ${user.id === session.uid ? '' : `<button class="ghost-btn danger" data-action="revokeUser" data-uid="${user.id}">Remover acesso</button>`}
     </td>
@@ -83,7 +86,7 @@ function usersSection() {
       <h2>Acessos ao painel</h2>
       <button class="crm-add-btn" data-action="newUser">+ Criar acesso</button>
     </div>
-    <p class="pacer-note">Não existe cadastro aberto: toda conta nasce aqui. Remover o acesso tira a pessoa do painel na hora, mesmo que a conta de email continue existindo.</p>
+    <p class="pacer-note">Não existe cadastro aberto: toda conta nasce aqui. A funcionária recebe um link por email, cria a própria senha e já entra para lançar as vendas dela. Remover o acesso tira a pessoa do painel na hora.</p>
     ${rows ? `<table class="data-table">
       <thead><tr><th>Nome</th><th>Email</th><th>Nível</th><th>Vendedora</th><th>Situação</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table>`
@@ -226,6 +229,7 @@ onClick({
 
   newUser() { openCreateUserModal(); },
   editUser({ uid }) { openEditUserModal(uid); },
+  sendPasswordLink({ uid }) { openSendPasswordLink(uid); },
 
   revokeUser({ uid }) {
     const user = state.users.find(u => u.id === uid);

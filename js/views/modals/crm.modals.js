@@ -3,6 +3,7 @@ import { showToast } from '../../ui/toast.js';
 import { state } from '../../core/store.js';
 import { isAdmin, myVendorId } from '../../core/session.js';
 import { todayIso } from '../../ui/format.js';
+import { readNumber, readDate } from '../../ui/mask.js';
 import { metaVendors } from '../../domain/metas.js';
 import { clientById, transferSuggestion } from '../../domain/crm.js';
 import { createClient, updateClient, createPurchase, createContact, createTransfer } from '../../data/crm.repo.js';
@@ -17,8 +18,8 @@ export function openClientModal(clientId = null) {
     title: client ? `Editar ${client.name}` : 'Nova cliente',
     body: `
       ${field({ id: 'clientName', label: 'Nome', value: client?.name || '', placeholder: 'Nome completo' })}
-      ${field({ id: 'clientPhone', label: 'Telefone / WhatsApp', value: client?.phone || '', placeholder: '(00) 00000-0000' })}
-      ${field({ id: 'clientBirthday', label: 'Aniversário (dia/mês)', value: client?.birthday || '', placeholder: 'ex: 15/03' })}
+      ${field({ id: 'clientPhone', label: 'Telefone / WhatsApp', mask: 'phone', value: client?.phone || '' })}
+      ${field({ id: 'clientBirthday', label: 'Aniversário (dia/mês)', mask: 'birthday', value: client?.birthday || '' })}
       ${selectField({
         id: 'clientOwner', label: 'Carteira de', options: vendorOptions(), value: ownerDefault,
         attrs: isAdmin() ? '' : 'disabled',
@@ -61,9 +62,14 @@ export function openPurchaseModal(clientId = null) {
         id: 'purchaseClient', label: 'Cliente', value: clientId || '',
         options: [{ value: '', label: '— selecione —' }, ...clients.map(c => ({ value: c.id, label: c.name }))]
       })}
-      ${field({ id: 'purchaseDate', label: 'Data', type: 'date', value: todayIso() })}
-      ${selectField({ id: 'purchaseVendor', label: 'Quem atendeu', options: vendorOptions(), value: isAdmin() ? '' : myVendorId() })}
-      ${field({ id: 'purchaseValue', label: 'Valor (R$)', type: 'number', placeholder: '0,00', attrs: 'step="0.01" min="0"' })}
+      ${field({ id: 'purchaseDate', label: 'Data', mask: 'date', value: todayIso() })}
+      ${selectField({
+        id: 'purchaseVendor', label: 'Quem atendeu', options: vendorOptions(),
+        value: isAdmin() ? '' : myVendorId(),
+        attrs: isAdmin() ? '' : 'disabled',
+        hint: isAdmin() ? '' : 'A compra entra no seu nome.'
+      })}
+      ${field({ id: 'purchaseValue', label: 'Valor (R$)', mask: 'money' })}
       ${field({ id: 'purchaseNotes', label: 'O que comprou (opcional)', placeholder: 'ex: vestido + sandália' })}`,
     actions: [
       { label: 'Cancelar', kind: 'secondary' },
@@ -72,8 +78,8 @@ export function openPurchaseModal(clientId = null) {
         kind: 'primary',
         onClick: async ({ body }) => {
           const targetClient = body.querySelector('#purchaseClient').value;
-          const date = body.querySelector('#purchaseDate').value;
-          const value = Number(body.querySelector('#purchaseValue').value);
+          const date = readDate(body.querySelector('#purchaseDate'));
+          const value = readNumber(body.querySelector('#purchaseValue'));
 
           if (!targetClient) { showToast('Selecione uma cliente'); return false; }
           if (!date || !value || value <= 0) { showToast('Preencha a data e um valor válido'); return false; }
@@ -81,7 +87,7 @@ export function openPurchaseModal(clientId = null) {
           await createPurchase({
             clientId: targetClient,
             date,
-            vendorId: body.querySelector('#purchaseVendor').value,
+            vendorId: isAdmin() ? body.querySelector('#purchaseVendor').value : myVendorId(),
             value,
             notes: body.querySelector('#purchaseNotes').value.trim()
           });
@@ -101,7 +107,7 @@ export function openContactModal(clientId) {
     title: 'Registrar contato',
     subtitle: 'O contato de hoje tira a cliente da lista de tarefas.',
     body: `
-      ${field({ id: 'contactDate', label: 'Data', type: 'date', value: todayIso() })}
+      ${field({ id: 'contactDate', label: 'Data', mask: 'date', value: todayIso() })}
       ${selectField({
         id: 'contactChannel', label: 'Canal', value: 'WhatsApp',
         options: ['WhatsApp', 'Ligação', 'Instagram', 'Presencial', 'Outro'].map(c => ({ value: c, label: c }))
@@ -113,7 +119,7 @@ export function openContactModal(clientId) {
         label: 'Registrar',
         kind: 'primary',
         onClick: async ({ body }) => {
-          const date = body.querySelector('#contactDate').value;
+          const date = readDate(body.querySelector('#contactDate'));
           if (!date) { showToast('Preencha a data'); return false; }
 
           await createContact({

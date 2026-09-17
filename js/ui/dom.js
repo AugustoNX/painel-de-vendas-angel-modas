@@ -1,3 +1,5 @@
+import { parseNumber } from './mask.js';
+
 export const $ = id => document.getElementById(id);
 
 export function setHtml(id, html) {
@@ -15,12 +17,11 @@ export function val(id) {
   return el ? el.value.trim() : '';
 }
 
-/** Número de um input, ou null quando está vazio ou inválido. */
+/** Número de um input (aceita 1.234,56), ou null quando está vazio ou inválido. */
 export function num(id) {
   const el = $(id);
-  if (!el || el.value === '') return null;
-  const parsed = Number(el.value);
-  return isNaN(parsed) ? null : parsed;
+  if (!el || el.value.trim() === '') return null;
+  return parseNumber(el.value);
 }
 
 export function setVal(id, value) {

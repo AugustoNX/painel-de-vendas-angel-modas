@@ -1,4 +1,5 @@
 import { esc } from './format.js';
+import { displayMasked, maskAttrs, maskPlaceholder } from './mask.js';
 
 const stack = [];
 
@@ -93,10 +94,13 @@ document.addEventListener('keydown', event => {
 });
 
 /** Campo de formulário padronizado para o corpo dos modais. */
-export function field({ id, label, type = 'text', value = '', placeholder = '', hint = '', attrs = '' }) {
+export function field({ id, label, type = 'text', value = '', placeholder = '', hint = '', attrs = '', mask = '' }) {
+  const inputType = mask === 'phone' ? 'tel' : mask ? 'text' : type;
+  const shown = mask ? displayMasked(mask, value) : value;
+  const ph = maskPlaceholder(mask, placeholder);
   return `<div class="field">
     <label for="${id}">${esc(label)}</label>
-    <input id="${id}" type="${type}" value="${esc(value)}" placeholder="${esc(placeholder)}" ${attrs}>
+    <input id="${id}" type="${inputType}" value="${esc(shown)}" placeholder="${esc(ph)}" ${mask ? maskAttrs(mask) : ''} ${attrs}>
     ${hint ? `<span class="field-hint">${hint}</span>` : ''}
   </div>`;
 }

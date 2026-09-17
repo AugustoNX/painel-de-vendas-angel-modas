@@ -3,6 +3,7 @@ import { state, setState, subscribe, periodKey } from './core/store.js';
 import { watchSession, session, isAdmin, isVendedora, signOut } from './core/session.js';
 import { startSync, stopSync, syncSalesPeriod } from './data/sync.js';
 import { initActions, onClick } from './ui/actions.js';
+import { applyMasks } from './ui/mask.js';
 import { closeAllModals } from './ui/modal.js';
 import { $, setHtml, show } from './ui/dom.js';
 import { esc } from './ui/format.js';
@@ -141,6 +142,7 @@ onClick({
 /* ------------------------------------------------------------------ */
 
 initActions();
+applyMasks();
 subscribe(render);
 renderLogin();
 watchSession(onSessionChange);

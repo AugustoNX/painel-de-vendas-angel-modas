@@ -200,7 +200,10 @@
   }
   .modal h3{margin:0 0 14px 0; font-size:16px; color:var(--ink); font-family:var(--font-display);}
   .modal .field{margin-bottom:10px;}
-  .modal .field input[type=text]{width:100%;}
+  .modal .field input[type=text],
+  .modal .field input[type=tel],
+  .modal .field input[type=email],
+  .modal .field input[type=password]{width:100%;}
   .modal-hint{font-size:11.5px; color:var(--muted); margin:10px 0; line-height:1.5;}
   .july-check{display:flex; align-items:center; gap:8px; font-size:13.5px; margin-bottom:6px;}
   .modal-actions{
@@ -552,6 +555,22 @@
   .empty-goal h2{margin-bottom:8px;}
   .empty-goal p{color:var(--muted); font-size:13px; max-width:520px; margin:0 auto 16px auto; line-height:1.6;}
 
+  /* ---------- tempo sem vender ---------- */
+  .idle-strip{
+    border:1px solid #BFE3CC; background:#EAF7EF; border-radius:11px;
+    padding:11px 14px; margin:10px 0 12px 0;
+  }
+  .idle-strip.idle-warn{border-color:#F0CFAE; background:#FDF3E8;}
+  .idle-main{font-size:15px; font-weight:700; color:#2C6B45; font-family:var(--font-display);}
+  .idle-strip.idle-warn .idle-main{color:#9A5A16;}
+  .idle-sub{font-size:12px; color:var(--muted); margin-top:3px; line-height:1.5;}
+  .idle-sub b{color:var(--ink);}
+  .idle-tag{
+    display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:700;
+    background:rgba(62,140,85,.15); color:var(--ok);
+  }
+  .idle-tag.warn{background:rgba(224,123,57,.15); color:#9A5A16;}
+
   /* ---------- gráficos ---------- */
   .chart{width:100%; margin:6px 0 4px 0;}
   .chart svg{width:100%; height:auto; display:block; overflow:visible;}
@@ -612,7 +631,12 @@
   .modal-body{margin-top:12px;}
   .modal-text{font-size:13.5px; line-height:1.6; color:var(--ink); margin:0;}
   .field-hint{font-size:11px; color:var(--muted); line-height:1.4;}
-  .field select, .field input[type=email], .field input[type=number], .field input[type=date], .field input[type=password], .field input[type=file]{width:100%;}
+  .field select, .field input[type=email], .field input[type=number], .field input[type=date], .field input[type=password], .field input[type=file], .field input[type=tel], .field input[data-mask]{width:100%;}
+  input[data-mask="money"],
+  input[data-mask="integer"]{
+    text-align:right;
+    font-variant-numeric:tabular-nums;
+  }
   .btn-danger{
     background:rgba(192,71,59,.1); color:var(--danger); border:none; padding:9px 16px; border-radius:8px;
     cursor:pointer; font-weight:700; font-size:13.5px; margin-right:auto;

@@ -5,6 +5,7 @@ import { onClick, onInput } from '../ui/actions.js';
 import { showToast } from '../ui/toast.js';
 import { openModal, field, selectField, confirmModal } from '../ui/modal.js';
 import { money, esc, dateBr, todayIso, pct } from '../ui/format.js';
+import { readNumber, readDate } from '../ui/mask.js';
 import { vendorName } from '../domain/metas.js';
 import { clientName } from '../domain/crm.js';
 import { marcaById, findMarcaByName, otbCombos, otbSuggestion } from '../domain/otb.js';
@@ -141,10 +142,10 @@ function openStockPurchaseModal() {
         <datalist id="stockMarcaOptions">${state.marcas.map(m => `<option value="${esc(m.name)}">`).join('')}</datalist>
       </div>
       ${selectField({ id: 'stockColecao', label: 'Coleção', options: COLECOES.map(c => ({ value: c, label: c })), value: 'Verão' })}
-      ${field({ id: 'stockAno', label: 'Ano da coleção', type: 'number', value: new Date().getFullYear(), attrs: 'min="2020" max="2100"' })}
-      ${field({ id: 'stockDate', label: 'Data da compra', type: 'date', value: todayIso() })}
-      ${field({ id: 'stockPecas', label: 'Quantidade de peças', type: 'number', attrs: 'min="0" step="1"', placeholder: '0' })}
-      ${field({ id: 'stockValor', label: 'Valor total (R$)', type: 'number', attrs: 'min="0" step="0.01"', placeholder: '0,00' })}`,
+      ${field({ id: 'stockAno', label: 'Ano da coleção', mask: 'year', value: new Date().getFullYear() })}
+      ${field({ id: 'stockDate', label: 'Data da compra', mask: 'date', value: todayIso() })}
+      ${field({ id: 'stockPecas', label: 'Quantidade de peças', mask: 'integer' })}
+      ${field({ id: 'stockValor', label: 'Valor total (R$)', mask: 'money' })}`,
     actions: [
       { label: 'Cancelar', kind: 'secondary' },
       {
@@ -152,9 +153,9 @@ function openStockPurchaseModal() {
         kind: 'primary',
         onClick: async ({ body }) => {
           const marcaName = body.querySelector('#stockMarca').value.trim();
-          const pecasQtd = Number(body.querySelector('#stockPecas').value);
-          const valor = Number(body.querySelector('#stockValor').value);
-          const date = body.querySelector('#stockDate').value;
+          const pecasQtd = readNumber(body.querySelector('#stockPecas'));
+          const valor = readNumber(body.querySelector('#stockValor'));
+          const date = readDate(body.querySelector('#stockDate'));
 
           if (!marcaName) { showToast('Digite o nome da marca'); return false; }
           if (!date || !pecasQtd || pecasQtd <= 0 || !valor || valor <= 0) {
@@ -167,7 +168,7 @@ function openStockPurchaseModal() {
           await createStockPurchase({
             marcaId,
             colecao: body.querySelector('#stockColecao').value,
-            ano: Number(body.querySelector('#stockAno').value),
+            ano: readNumber(body.querySelector('#stockAno')),
             date,
             pecas: pecasQtd,
             valor
