@@ -15,6 +15,7 @@ import { renderCompras } from './views/compras.view.js';
 import { renderEquipe } from './views/equipe.view.js';
 import { pendingTransfers } from './domain/crm.js';
 import { vendorName } from './domain/metas.js';
+import { openSaleModal } from './views/modals/sale.modal.js';
 
 const NAV = [
   { view: VIEWS.VENDAS, icon: '📊', label: 'Objetivos e Vendas', adminOnly: false },
@@ -46,6 +47,7 @@ function render() {
 
   renderHeader();
   renderNav();
+  renderSaleFab();
 
   show('viewVendas', state.view === VIEWS.VENDAS);
   show('viewCarteira', state.view === VIEWS.CARTEIRA);
@@ -69,11 +71,24 @@ function renderHeader() {
       <span class="session-name">${esc(profile.name || profile.email)}</span>
       <span class="session-role">${roleLabel}</span>
     </div>
+    ${isVendedora() && session.profile?.vendorId
+      ? '<button class="header-sale-btn" data-action="openSale">+ Venda</button>'
+      : ''}
     <button class="logout-btn" data-action="logout">Sair</button>`);
 
   setHtml('subtitle', isAdmin()
     ? `Painel de metas · ${MONTH_NAMES[state.month]}/${state.year} · lançamento de vendas, carteira de clientes e compras`
     : `Seus resultados de ${MONTH_NAMES[state.month]}/${state.year} e a sua carteira de clientes`);
+}
+
+function renderSaleFab() {
+  const el = $('saleFab');
+  if (!el) return;
+  const show = isVendedora() && !!session.profile?.vendorId;
+  el.innerHTML = show
+    ? '<button class="sale-fab" data-action="openSale">+ Registrar venda</button>'
+    : '';
+  document.body.classList.toggle('has-sale-fab', show);
 }
 
 function renderNav() {
@@ -100,6 +115,9 @@ function onSessionChange(profile, reason) {
     lastPeriod = null;
     show('appShell', false);
     renderLogin(LOGIN_MESSAGES[reason] || '');
+    const fab = $('saleFab');
+    if (fab) fab.innerHTML = '';
+    document.body.classList.remove('has-sale-fab');
     return;
   }
 
@@ -129,6 +147,10 @@ onClick({
       return;
     }
     setState({ view });
+  },
+
+  openSale() {
+    openSaleModal();
   },
 
   async logout() {

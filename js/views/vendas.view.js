@@ -18,6 +18,7 @@ import {
 import { addSale, deleteSale } from '../data/sales.repo.js';
 import { patchGoal } from '../data/goals.repo.js';
 import { openGoalModal } from './modals/goal.modal.js';
+import { openSaleModal } from './modals/sale.modal.js';
 import { openImportSalesModal } from '../features/import-vendas.js';
 import { exportCommissionPdf } from '../features/report-pdf.js';
 
@@ -29,15 +30,14 @@ export function renderVendas() {
   let html = periodNav();
 
   if (!goal) {
-    el.innerHTML = html + emptyGoalState();
+    el.innerHTML = html + (isAdmin() ? emptyGoalState() : vendorNoGoalState());
     return;
   }
 
   if (isAdmin()) {
     html += storeCard(goal) + evolutionCard(goal) + rankingCard(goal) + idleCard(goal);
   } else {
-    // A vendedora abre o painel para lançar: o formulário vem antes da análise.
-    html += vendorHeroCard(goal) + entryCard(goal);
+    html += saleCtaCard() + vendorHeroCard(goal);
   }
 
   html += tierGoalsCard(goal);
@@ -73,6 +73,32 @@ function periodNav() {
       <button class="year-add" data-action="selectYear" data-year="${Math.max(...years) + 1}" title="Ir para o próximo ano">+</button>
     </div>
     <nav class="months">${monthsHtml}</nav>
+  </div>`;
+}
+
+function vendorNoGoalState() {
+  const label = `${MONTH_NAMES[state.month]}/${state.year}`;
+  return saleCtaCard() + `<div class="card empty-goal">
+    <h2>Meta de ${label} ainda não publicada</h2>
+    <p>Você já pode cadastrar as vendas do dia. Assim que a administração definir o objetivo, elas entram no acompanhamento dos níveis.</p>
+  </div>` + (myVendorId() ? `<div class="card">${salesTable(myVendorId())}</div>` : '');
+}
+
+/**
+ * O botão que a vendedora usa o dia inteiro: fecha a venda no caixa e vem
+ * registrar o que saiu. O formulário completo abre num modal.
+ */
+function saleCtaCard() {
+  if (!vendorById(myVendorId())) {
+    return `<div class="card empty-goal"><h2>Seu acesso ainda não está ligado a uma vendedora</h2>
+      <p>Peça para a administração vincular sua conta no menu Equipe.</p></div>`;
+  }
+  return `<div class="card sale-cta">
+    <div>
+      <h2>Fechou uma venda?</h2>
+      <p>Cadastre o valor, as peças e o que saiu. Entra na hora na sua meta.</p>
+    </div>
+    <button class="sale-cta-btn" data-action="openSale">Registrar venda</button>
   </div>`;
 }
 
@@ -500,15 +526,19 @@ function salesTable(vendorId) {
   const canDelete = sale => isAdmin() || (vendorId === myVendorId() && sale.source !== 'import');
 
   const rows = sales.map(sale => `<tr>
-    <td>${dateBr(sale.date)}</td>
+    <td>
+      <div>${dateBr(sale.date)}</div>
+      ${sale.items ? `<div class="sale-items">${esc(sale.items)}</div>` : ''}
+    </td>
     <td>${money(sale.amount)}</td>
     <td>${sale.pecas ? pecas(sale.pecas) : '—'}</td>
+    <td>${sale.payment ? esc(sale.payment) : '—'}</td>
     <td>${sale.source === 'import' ? '<span class="src-tag">PDF</span>' : ''}</td>
     <td>${canDelete(sale) ? `<button class="del-btn" data-action="deleteSale" data-sale-id="${sale.id}">remover</button>` : ''}</td>
   </tr>`).join('');
 
   return `<div class="mini-title">Vendas lançadas</div>
-    <table class="entries"><thead><tr><th>Data</th><th>Valor</th><th>Peças</th><th>Origem</th><th></th></tr></thead>
+    <table class="entries"><thead><tr><th>Data / o que saiu</th><th>Valor</th><th>Peças</th><th>Pagamento</th><th></th><th></th></tr></thead>
     <tbody>${rows}</tbody></table>`;
 }
 
@@ -537,21 +567,19 @@ function extraVendorItem(vendor) {
  * banco exigem na gravação.
  */
 function entryCard(goal) {
-  if (isVendedora() && !vendorById(myVendorId())) return '';
-
-  const vendorPicker = isAdmin()
-    ? `<div class="field"><label for="inpVendor">Vendedora</label>
+  const vendorPicker = `<div class="field"><label for="inpVendor">Vendedora</label>
         <select id="inpVendor">${[...goalVendors(goal), ...extraVendors()]
           .map(vendor => `<option value="${vendor.id}">${esc(vendor.name)}${vendor.isExtra ? ' (apoio)' : ''}</option>`)
-          .join('')}</select></div>`
-    : '';
+          .join('')}</select></div>`;
 
   return `<div class="card entry-card">
     <div class="store-card-header">
-      <h2>${isAdmin() ? 'Lançar venda do dia' : 'Lançar a sua venda'}</h2>
-      ${isAdmin() ? '<button class="crm-add-btn" data-action="openImportSales">📄 Importar relatório (PDF)</button>' : ''}
+      <h2>Lançar venda do dia</h2>
+      <div class="store-card-header-right">
+        <button class="ghost-btn" data-action="openSale">Formulário completo</button>
+        <button class="crm-add-btn" data-action="openImportSales">📄 Importar relatório (PDF)</button>
+      </div>
     </div>
-    ${isAdmin() ? '' : '<p class="pacer-note">Lance a sua venda assim que fechar o atendimento. O valor entra na hora na sua meta e no total da loja.</p>'}
     <div class="entry-form">
       <div class="field"><label for="inpDate">Data</label>
         <input id="inpDate" type="text" value="${displayMasked('date', todayIso())}" placeholder="00/00/0000" ${maskAttrs('date')}></div>
@@ -616,6 +644,10 @@ onClick({
 
   openGoal() {
     openGoalModal(state.year, state.month);
+  },
+
+  openSale() {
+    openSaleModal();
   },
 
   openImportSales() {

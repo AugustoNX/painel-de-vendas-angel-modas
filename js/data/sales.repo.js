@@ -17,12 +17,18 @@ export function listSales(periodKey) {
   return readList(salesPath(periodKey));
 }
 
-export function addSale(periodKey, { date, vendorId, amount, pecas = 0, source = 'manual', controle = null }) {
+export function addSale(periodKey, {
+  date, vendorId, amount, pecas = 0, source = 'manual', controle = null,
+  items = '', payment = '', clientId = null
+}) {
   const id = newId(salesPath(periodKey));
   return writeAt(`${salesPath(periodKey)}/${id}`, {
     date, vendorId,
     amount: Number(amount) || 0,
     pecas: Number(pecas) || 0,
+    items: items || '',
+    payment: payment || '',
+    clientId: clientId || null,
     source,
     controle,
     createdBy: session.uid || null,

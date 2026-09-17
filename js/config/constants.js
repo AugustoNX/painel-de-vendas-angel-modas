@@ -16,6 +16,14 @@ export const DEFAULT_TIER_MULTIPLIERS = { bronze: 0.88, prata: 1, ouro: 1.15, di
 
 export const COLECOES = ['Primavera', 'Verão', 'Outono', 'Inverno'];
 
+export const PAYMENT_METHODS = ['PIX', 'Cartão de crédito', 'Cartão de débito', 'Dinheiro', 'Crediário', 'Outro'];
+
+/** Atalhos do que mais sai numa loja de roupa — a vendedora toca em vez de digitar. */
+export const CLOTHING_ITEMS = [
+  'Vestido', 'Conjunto', 'Blusa', 'Calça', 'Saia', 'Short',
+  'Jaqueta', 'Body', 'Macacão', 'Calçado', 'Bolsa', 'Acessório'
+];
+
 export const DB_PATHS = {
   users: 'users',
   vendors: 'vendors',

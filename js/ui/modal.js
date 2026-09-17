@@ -105,6 +105,14 @@ export function field({ id, label, type = 'text', value = '', placeholder = '', 
   </div>`;
 }
 
+export function textareaField({ id, label, value = '', placeholder = '', hint = '', rows = 3 }) {
+  return `<div class="field">
+    <label for="${id}">${esc(label)}</label>
+    <textarea id="${id}" rows="${rows}" placeholder="${esc(placeholder)}">${esc(value)}</textarea>
+    ${hint ? `<span class="field-hint">${hint}</span>` : ''}
+  </div>`;
+}
+
 export function selectField({ id, label, options, value, hint = '', attrs = '' }) {
   return `<div class="field">
     <label for="${id}">${esc(label)}</label>
