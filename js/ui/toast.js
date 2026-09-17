@@ -1,7 +1,13 @@
-export function showToast(msg){
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  clearTimeout(showToast._tm);
-  showToast._tm = setTimeout(()=> t.classList.remove('show'), 2200);
+let timer = null;
+
+export function showToast(message, kind = 'info') {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = message;
+  el.className = 'toast show toast-' + kind;
+  clearTimeout(timer);
+  timer = setTimeout(() => { el.className = 'toast'; }, 2800);
 }
+
+export const toastError = message => showToast(message, 'error');
+export const toastOk = message => showToast(message, 'ok');

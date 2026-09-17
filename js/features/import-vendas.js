@@ -1,202 +1,160 @@
-import { state } from '../state/store.js';
-import { MONTH_NUM } from '../config/constants.js';
-import { money, pecas, toFloatBR } from '../utils/format.js';
-import { extractPdfText } from '../utils/pdf.js';
+import { state } from '../core/store.js';
+import { MONTH_NAMES } from '../config/constants.js';
+import { openModal } from '../ui/modal.js';
 import { showToast } from '../ui/toast.js';
-import { saveConfig, saveEntries, saveExtraEntries, genId } from '../state/store.js';
-import { renderAll } from './vendas-view.js';
+import { money, pecas, esc, dateBr } from '../ui/format.js';
+import { metaVendors, extraVendors } from '../domain/metas.js';
+import { extractPdfText } from './pdf-reader.js';
+import { parseSalesReport } from './report-parser.js';
+import { saveReportMapping, mappingKey } from '../data/settings.repo.js';
+import { listSales, addSale } from '../data/sales.repo.js';
 
-/* ================= Importar relatório PDF ================= */
+const IGNORE = 'ignore';
 
-export function openImportModal(){
-  document.getElementById('importFileInput').value = '';
-  document.getElementById('importStatus').textContent = '';
-  document.getElementById('importPreviewArea').innerHTML = '';
-  document.getElementById('importConfirmBtn').style.display = 'none';
-  state.importParsedTransactions = [];
-  document.getElementById('importModal').classList.add('open');
-}
-export function closeImportModal(){
-  document.getElementById('importModal').classList.remove('open');
-}
+export function openImportSalesModal() {
+  let parsed = [];
+  let mapping = { ...state.settings.reportNameMapping };
 
-export function monthNameFromDateStr(dateStr){
-  const parts = dateStr.split('/');
-  const mm = parts[1], yyyy = parts[2];
-  if (yyyy !== '2026') return null;
-  const found = Object.entries(MONTH_NUM).find(([k,v])=> v===mm);
-  return found ? found[0] : null;
-}
+  openModal({
+    title: 'Importar relatório de vendas (PDF)',
+    subtitle: 'Relatório "VENDAS / TROCAS - ANALÍTICO" do ERP. Nada é salvo até você confirmar, e lançamentos já importados são pulados automaticamente.',
+    size: 'lg',
+    body: `
+      <div class="field"><input type="file" id="importFile" accept="application/pdf"></div>
+      <div id="importStatus" class="import-status"></div>
+      <div id="importPreview"></div>`,
+    actions: [
+      { label: 'Fechar', kind: 'secondary' },
+      {
+        label: 'Confirmar importação',
+        kind: 'primary',
+        onClick: async ({ body }) => {
+          if (!parsed.length) { showToast('Escolha um arquivo primeiro'); return false; }
+          return confirmImport(parsed, mapping, body);
+        }
+      }
+    ],
+    onMount(overlay) {
+      const input = overlay.querySelector('#importFile');
+      const status = overlay.querySelector('#importStatus');
+      const preview = overlay.querySelector('#importPreview');
 
-const PAYMENT_METHODS = ['CARTÃO DE CRÉDITO - REDE','CARTÃO DE DEBITO - SICREDI','CREDIÁRIO','DINHEIRO','PIX'];
-export function extractPaymentMethod(block){
-  let earliest = null, earliestIdx = Infinity;
-  PAYMENT_METHODS.forEach(pm=>{
-    const idx = block.indexOf(pm);
-    if (idx !== -1 && idx < earliestIdx){ earliestIdx = idx; earliest = pm; }
-  });
-  return earliest || 'Não informado';
-}
+      input.addEventListener('change', async () => {
+        const file = input.files[0];
+        if (!file) return;
+        status.textContent = 'Lendo o PDF...';
+        preview.innerHTML = '';
 
-export function parseReportText(text){
-  const anchorRe = /(\d{6})\s+(\d{2}\/\d{2}\/\d{4})\s+/g;
-  const anchors = [];
-  let m;
-  while ((m = anchorRe.exec(text)) !== null){
-    anchors.push({ controle: m[1], date: m[2], index: m.index, headerEnd: m.index + m[0].length });
-  }
-  const results = [];
-  for (let i=0; i<anchors.length; i++){
-    const start = anchors[i].index;
-    const end = (i+1 < anchors.length) ? anchors[i+1].index : text.length;
-    const block = text.slice(start, end);
-    const qtdeM = block.match(/TOTAL QTDE:\s*(-?\d+)/);
-    const totalGeralM = block.match(/TOTAL GERAL:\s*([\-\d.,]+)/);
-    const colabM = block.match(/COLABORADOR\(A\):\s*(.+?)(?=\s*TOTAL QTDE:|\s*COND\.PGTO|\n|$)/);
-    if (!qtdeM || !totalGeralM || !colabM) continue;
-    const month = monthNameFromDateStr(anchors[i].date);
+        try {
+          parsed = parseSalesReport(await extractPdfText(await file.arrayBuffer()));
+          if (!parsed.length) {
+            status.textContent = 'Não reconheci nenhuma venda nesse arquivo. Confirme que é o relatório "VENDAS / TROCAS - ANALÍTICO".';
+            return;
+          }
+          const periods = [...new Set(parsed.map(t => t.periodKey))].sort();
+          status.innerHTML = `<b>${parsed.length}</b> vendas encontradas, de ${periods.map(labelPeriod).join(', ')}.
+            Confira quem é quem antes de confirmar.`;
+          renderPreview(preview, parsed, mapping);
+        } catch (err) {
+          console.error(err);
+          status.textContent = 'Não consegui ler esse arquivo. Confirme que é um PDF válido.';
+        }
+      });
 
-    // client name: text between the date and "PRODUTO", minus status tags
-    const headerSlice = text.slice(anchors[i].headerEnd, anchors[i].headerEnd + 200);
-    const nameM = headerSlice.match(/^(.*?)(?=PRODUTO|\n)/);
-    let cliente = nameM ? nameM[1] : '';
-    cliente = cliente.replace(/FAT\.|PEN\./gi, '').replace(/SITUAÇÃO/gi,'').trim();
-    cliente = cliente.replace(/^[.,\-\s]+/, '').trim();
-
-    const paymentMethod = extractPaymentMethod(block);
-
-    results.push({
-      controle: anchors[i].controle,
-      dateStr: anchors[i].date,
-      month: month,
-      qtde: parseInt(qtdeM[1], 10),
-      valor: toFloatBR(totalGeralM[1]),
-      colaborador: colabM[1].trim(),
-      cliente: cliente,
-      paymentMethod: paymentMethod
-    });
-  }
-  return results;
-}
-
-export function importTargetOptions(selectedKey){
-  let html = '<option value="ignore"' + (selectedKey==='ignore'?' selected':'') + '>Ignorar (não importar)</option>';
-  state.config.names.forEach((name,i)=>{
-    const key = 'v'+i;
-    html += `<option value="${key}"${selectedKey===key?' selected':''}>${name} (vendedora)</option>`;
-  });
-  (state.config.extraNames||[]).forEach((name,i)=>{
-    const key = 'e'+i;
-    html += `<option value="${key}"${selectedKey===key?' selected':''}>${name} (extra)</option>`;
-  });
-  return html;
-}
-
-export async function handleImportFile(input){
-  const file = input.files[0];
-  if (!file) return;
-  const statusEl = document.getElementById('importStatus');
-  statusEl.textContent = 'Lendo o PDF...';
-  document.getElementById('importPreviewArea').innerHTML = '';
-  document.getElementById('importConfirmBtn').style.display = 'none';
-  try{
-    const buffer = await file.arrayBuffer();
-    const text = await extractPdfText(buffer);
-    const parsed = parseReportText(text);
-    if (!parsed.length){
-      statusEl.textContent = 'Não consegui reconhecer nenhuma venda nesse PDF. Confirme se é o relatório "VENDAS / TROCAS - ANALÍTICO".';
-      return;
+      preview.addEventListener('change', event => {
+        const select = event.target.closest('select[data-colab]');
+        if (!select) return;
+        mapping[mappingKey(select.dataset.colab)] = select.value;
+      });
     }
-    state.importParsedTransactions = parsed;
-    const outOfRange = parsed.filter(p => !p.month).length;
-    statusEl.textContent = `${parsed.length} vendas encontradas no PDF` + (outOfRange ? ` (${outOfRange} fora do período Jul-Dez/2026, serão ignoradas)` : '') + '. Confira o mapeamento abaixo antes de confirmar.';
-    renderImportPreview();
-  }catch(err){
-    statusEl.textContent = 'Não consegui ler esse arquivo. Confirme que é um PDF válido do relatório de vendas.';
-    console.error(err);
-  }
+  });
 }
 
-export function renderImportPreview(){
-  const area = document.getElementById('importPreviewArea');
+function labelPeriod(key) {
+  const [year, month] = key.split('-');
+  return `${MONTH_NAMES[Number(month) - 1]}/${year}`;
+}
+
+function vendorOptions(selected) {
+  const options = [`<option value="${IGNORE}"${selected === IGNORE || !selected ? ' selected' : ''}>Ignorar (não importar)</option>`];
+  metaVendors().forEach(vendor => {
+    options.push(`<option value="${vendor.id}"${selected === vendor.id ? ' selected' : ''}>${esc(vendor.name)}</option>`);
+  });
+  extraVendors().forEach(vendor => {
+    options.push(`<option value="${vendor.id}"${selected === vendor.id ? ' selected' : ''}>${esc(vendor.name)} (apoio)</option>`);
+  });
+  return options.join('');
+}
+
+function renderPreview(container, parsed, mapping) {
   const byColab = {};
-  state.importParsedTransactions.forEach(t=>{
-    if (!t.month) return;
-    if (!byColab[t.colaborador]) byColab[t.colaborador] = [];
-    byColab[t.colaborador].push(t);
-  });
+  parsed.forEach(tx => (byColab[tx.colaborador] ||= []).push(tx));
 
-  const mapping = state.config.reportNameMapping || {};
-  let html = '<div class="mini-title">Quem é quem</div>';
-  Object.keys(byColab).forEach(colab=>{
-    const list = byColab[colab];
-    const totalValor = list.reduce((s,t)=> s+t.valor, 0);
-    const totalPecas = list.reduce((s,t)=> s+t.qtde, 0);
-    const selectedKey = mapping[colab] || 'ignore';
-    const safeId = 'mapSel_' + colab.replace(/[^a-zA-Z0-9]/g,'');
-    html += `<div class="import-person-row">
+  const people = Object.entries(byColab).map(([colab, list]) => {
+    const total = list.reduce((sum, tx) => sum + tx.valor, 0);
+    const qtd = list.reduce((sum, tx) => sum + tx.qtde, 0);
+    return `<div class="import-person-row">
       <div>
-        <div class="import-person-name">${colab}</div>
-        <div class="import-person-stats">${list.length} vendas · ${money(totalValor)} · ${pecas(totalPecas)}</div>
+        <div class="import-person-name">${esc(colab)}</div>
+        <div class="import-person-stats">${list.length} vendas · ${money(total)} · ${pecas(qtd)}</div>
       </div>
-      <select id="${safeId}" data-colab="${colab.replace(/"/g,'&quot;')}" onchange="updateImportMapping(this)">
-        ${importTargetOptions(selectedKey)}
-      </select>
+      <select data-colab="${esc(colab)}">${vendorOptions(mapping[mappingKey(colab)])}</select>
     </div>`;
-  });
+  }).join('');
 
-  html += '<details class="import-details"><summary>Ver todos os lançamentos detectados, dia a dia</summary>';
-  html += '<table class="import-days"><thead><tr><th>Data</th><th>Colaborador(a)</th><th>Valor</th><th>Peças</th></tr></thead><tbody>';
-  state.importParsedTransactions.forEach(t=>{
-    html += `<tr><td>${t.dateStr}${t.month?'':' ⚠️'}</td><td>${t.colaborador}</td><td>${money(t.valor)}</td><td>${t.qtde}</td></tr>`;
-  });
-  html += '</tbody></table></details>';
-
-  area.innerHTML = html;
-  document.getElementById('importConfirmBtn').style.display = '';
+  container.innerHTML = `<div class="mini-title">Quem é quem</div>${people}
+    <details class="import-details">
+      <summary>Ver os ${parsed.length} lançamentos detectados</summary>
+      <table class="import-days">
+        <thead><tr><th>Data</th><th>Colaborador(a)</th><th>Valor</th><th>Peças</th></tr></thead>
+        <tbody>${parsed.map(tx => `<tr>
+          <td>${dateBr(tx.dateIso)}</td><td>${esc(tx.colaborador)}</td><td>${money(tx.valor)}</td><td>${tx.qtde}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </details>`;
 }
 
-export function updateImportMapping(sel){
-  if (!state.config.reportNameMapping) state.config.reportNameMapping = {};
-  state.config.reportNameMapping[sel.dataset.colab] = sel.value;
-}
+/**
+ * Junta as vendas do PDF por vendedora e por dia, e grava um lançamento por dia.
+ * Antes disso lê o que já existe no mês para não duplicar uma importação repetida.
+ */
+async function confirmImport(parsed, mapping, body) {
+  const status = body.querySelector('#importStatus');
+  status.textContent = 'Importando...';
 
-export async function confirmImport(){
-  await saveConfig(); // persist any new name mappings
-  const mapping = state.config.reportNameMapping || {};
-  const byGroup = {}; // key: mapKey|month|date -> {valor, qtde}
-  state.importParsedTransactions.forEach(t=>{
-    if (!t.month) return;
-    const mapKey = mapping[t.colaborador];
-    if (!mapKey || mapKey === 'ignore') return;
-    const groupKey = mapKey + '|' + t.month + '|' + t.dateStr;
-    if (!byGroup[groupKey]) byGroup[groupKey] = { mapKey, month: t.month, dateStr: t.dateStr, valor: 0, qtde: 0 };
-    byGroup[groupKey].valor += t.valor;
-    byGroup[groupKey].qtde += t.qtde;
+  await Promise.all(Object.entries(mapping).map(([name, vendorId]) => saveReportMapping(name, vendorId)));
+
+  const grouped = new Map();
+  parsed.forEach(tx => {
+    const vendorId = mapping[mappingKey(tx.colaborador)];
+    if (!vendorId || vendorId === IGNORE) return;
+    const key = `${tx.periodKey}|${vendorId}|${tx.dateIso}`;
+    const bucket = grouped.get(key) || { periodKey: tx.periodKey, vendorId, date: tx.dateIso, amount: 0, pecas: 0 };
+    bucket.amount += tx.valor;
+    bucket.pecas += tx.qtde;
+    grouped.set(key, bucket);
   });
 
-  let added = 0, skipped = 0;
-  Object.values(byGroup).forEach(g=>{
-    const [dd, mm, yyyy] = g.dateStr.split('/');
-    const isoDate = `${yyyy}-${mm}-${dd}`;
-    if (g.mapKey.startsWith('v')){
-      const vendorIdx = Number(g.mapKey.slice(1));
-      const exists = state.entries.some(e => e.month===g.month && e.vendorIdx===vendorIdx && e.date===isoDate);
-      if (exists){ skipped++; return; }
-      state.entries.push({ id: genId(), month: g.month, date: isoDate, vendorIdx, amount: g.valor, pecas: g.qtde });
-      added++;
-    } else if (g.mapKey.startsWith('e')){
-      const extraIdx = Number(g.mapKey.slice(1));
-      const exists = state.extraEntries.some(e => e.month===g.month && e.extraIdx===extraIdx && e.date===isoDate);
-      if (exists){ skipped++; return; }
-      state.extraEntries.push({ id: genId(), month: g.month, date: isoDate, extraIdx, amount: g.valor, pecas: g.qtde });
-      added++;
-    }
-  });
+  if (!grouped.size) {
+    status.textContent = 'Nenhum colaborador foi associado a uma vendedora — nada para importar.';
+    showToast('Associe pelo menos uma pessoa antes de confirmar');
+    return false;
+  }
 
-  await saveEntries();
-  await saveExtraEntries();
-  closeImportModal();
-  renderAll();
-  showToast(`Importação concluída: ${added} lançamento(s) adicionado(s)${skipped ? ', ' + skipped + ' pulado(s) por já existir' : ''}`);
+  const periods = [...new Set([...grouped.values()].map(entry => entry.periodKey))];
+  const existing = new Set();
+  for (const period of periods) {
+    (await listSales(period)).forEach(sale => existing.add(`${period}|${sale.vendorId}|${sale.date}`));
+  }
+
+  let added = 0;
+  let skipped = 0;
+  for (const entry of grouped.values()) {
+    const key = `${entry.periodKey}|${entry.vendorId}|${entry.date}`;
+    if (existing.has(key)) { skipped++; continue; }
+    await addSale(entry.periodKey, { ...entry, source: 'import' });
+    added++;
+  }
+
+  showToast(`Importação concluída: ${added} lançamento(s)${skipped ? `, ${skipped} pulado(s) por já existir` : ''}`);
 }
