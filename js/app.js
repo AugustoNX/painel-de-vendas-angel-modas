@@ -22,6 +22,12 @@ const NAV = [
   { view: VIEWS.EQUIPE, icon: '⚙️', label: 'Equipe e Acessos', adminOnly: true }
 ];
 
+const LOGIN_MESSAGES = {
+  'sem-perfil': 'Sua conta existe, mas ainda não tem acesso liberado. Peça para a administração cadastrar você.',
+  'inativo': 'Seu acesso está bloqueado. Fale com a administração.',
+  'erro': 'Entrei na sua conta, mas não consegui ler seu perfil no banco. Confira se as regras do Realtime Database foram publicadas.'
+};
+
 let lastPeriod = null;
 
 /* ------------------------------------------------------------------ */
@@ -92,11 +98,7 @@ function onSessionChange(profile, reason) {
     stopSync();
     lastPeriod = null;
     show('appShell', false);
-    renderLogin(reason === 'sem-perfil'
-      ? 'Sua conta existe, mas ainda não tem acesso liberado. Peça para a administração cadastrar você.'
-      : reason === 'inativo'
-        ? 'Seu acesso está bloqueado. Fale com a administração.'
-        : '');
+    renderLogin(LOGIN_MESSAGES[reason] || '');
     return;
   }
 

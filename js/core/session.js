@@ -60,20 +60,18 @@ export function watchSession(onChange) {
       session.uid = user.uid;
       session.email = user.email;
 
-      let profile = await readOnce(`${DB_PATHS.users}/${user.uid}`);
-      if (!profile) {
-        const anyUser = await readOnce(DB_PATHS.users);
-        if (!anyUser) {
-          profile = {
-            email: user.email,
-            name: user.email.split('@')[0],
-            role: ROLE.ADMIN,
-            vendorId: null,
-            active: true,
-            createdAt: nowIso()
-          };
-          await writeAt(`${DB_PATHS.users}/${user.uid}`, profile);
-        }
+      let profile;
+      try {
+        profile = await readOnce(`${DB_PATHS.users}/${user.uid}`);
+        if (!profile) profile = await bootstrapFirstAdmin(user);
+      } catch (err) {
+        // Sem isso, qualquer falha de leitura deixaria a tela de login travada.
+        console.error('Falha ao carregar o perfil', err);
+        session.profile = null;
+        session.ready = true;
+        await fbSignOut(auth).catch(() => {});
+        onChange(null, 'erro');
+        return;
       }
 
       if (!profile || profile.active === false) {
@@ -89,6 +87,37 @@ export function watchSession(onChange) {
       onChange(profile);
     });
   });
+}
+
+/**
+ * Cria o administrador inicial. Em vez de perguntar ao banco se já existe
+ * alguém em /users (leitura que só o admin tem), tentamos gravar o perfil: a
+ * regra `!root.child('users').exists()` só deixa passar enquanto o banco está
+ * vazio. Recusa aqui significa que a equipe já existe e essa conta ficou sem
+ * perfil — caso de quem foi criado direto no console do Firebase.
+ */
+async function bootstrapFirstAdmin(user) {
+  const profile = {
+    email: user.email,
+    name: user.email.split('@')[0],
+    role: ROLE.ADMIN,
+    vendorId: null,
+    active: true,
+    createdAt: nowIso()
+  };
+
+  try {
+    await writeAt(`${DB_PATHS.users}/${user.uid}`, profile);
+    return profile;
+  } catch (err) {
+    if (isPermissionDenied(err)) return null;
+    throw err;
+  }
+}
+
+function isPermissionDenied(err) {
+  const code = String(err?.code || err?.message || '').toUpperCase();
+  return code.includes('PERMISSION_DENIED') || code.includes('PERMISSION-DENIED');
 }
 
 export function signIn(email, password) {
