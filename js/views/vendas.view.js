@@ -1,19 +1,20 @@
 import { state, setState, currentGoal, periodKey } from '../core/store.js';
-import { MONTH_NAMES, TIER_ORDER, TIER_LABEL, RATES } from '../config/constants.js';
+import { MONTH_NAMES, TIER_LABEL } from '../config/constants.js';
 import { isAdmin, isVendedora, myVendorId } from '../core/session.js';
 import { $, val, num } from '../ui/dom.js';
 import { onClick, onInput, onChange } from '../ui/actions.js';
 import { showToast } from '../ui/toast.js';
 import { confirmModal } from '../ui/modal.js';
-import { money, moneyRound, pecas, fmt, esc, dateBr, todayIso, dayMonth } from '../ui/format.js';
+import { money, moneyRound, pecas, fmt, esc, dateBr, todayIso, dayMonth, ratePct } from '../ui/format.js';
 import { displayMasked, maskAttrs, parseDateBr, readNumber } from '../ui/mask.js';
 import { lineChart, barChart } from '../ui/charts.js';
 import {
   goalVendors, extraVendors, vendorById, vendorName, vendorTotal, vendorPecas, vendorWeekTotal,
-  salesOf, currentTier, nextTierInfo, topTierTarget, tierBonus, vendorBonus, availableTiers,
+  salesOf, currentTier, nextTierInfo, topTierTarget, tierBonus, vendorBonus, availableTiers, tierValue, tierRate, belowFirstTierLabel,
   storeSummary, currentWeeks, weeklyTargets, monthPecasTarget, isMonthOpen, monthOpensAt,
   goalFor, knownYears, cumulativeByDay, idealCumulativeByDay, cutAtToday, daysInMonth,
-  lastSaleDate, daysWithoutSelling, sellingDays, averagePerSellingDay, daysLeftInMonth
+  lastSaleDate, daysWithoutSelling, sellingDays, averagePerSellingDay,
+  workedDays, workedDaysNote, workDaysLeft
 } from '../domain/metas.js';
 import { addSale, deleteSale } from '../data/sales.repo.js';
 import { patchGoal } from '../data/goals.repo.js';
@@ -186,27 +187,30 @@ function vendorHeroCard(goal) {
   }
 
   const total = vendorTotal(vendorId);
-  const tier = currentTier(goal, total);
-  const next = nextTierInfo(goal, total);
-  const bonus = tierBonus(goal, tier);
+  const tier = currentTier(goal, total, vendorId);
+  const next = nextTierInfo(goal, total, vendorId);
+  const bonus = tierBonus(goal, tier, vendorId);
   const pecasVendidas = vendorPecas(vendorId);
+  const daysNote = workedDaysNote(goal, vendorId);
+  const workingDays = workedDays(goal, vendorId)?.length ?? daysInMonth();
 
   return `<div class="card store-card">
     <div class="store-card-header"><h2>${esc(vendor.name)} — ${MONTH_NAMES[state.month]}/${state.year}</h2></div>
+    ${daysNote ? `<p class="pacer-note days-note">${daysNote}</p>` : ''}
     <div class="kpi-grid">
       ${kpi('Você vendeu', money(total), 'big')}
       ${kpi('Peças', pecas(pecasVendidas))}
-      ${kpi('Nível atual', tier ? TIER_LABEL[tier] : 'Abaixo do Bronze')}
+      ${kpi('Nível atual', tier ? TIER_LABEL[tier] : belowFirstTierLabel(goal))}
       ${kpi(next ? `Falta para ${TIER_LABEL[next.tier]}` : 'Nível máximo', next ? money(next.falta) : '🎉', next ? 'missing' : 'done')}
       ${kpi('Bonificação garantida', money(bonus), 'done')}
     </div>
-    ${idleStrip(vendorId, next)}
+    ${idleStrip(vendorId, next, workDaysLeft(goal, vendorId))}
     <div class="kpi-grid">
       ${kpi('Ticket médio por peça', pecasVendidas > 0 ? money(total / pecasVendidas) : '—')}
-      ${kpi('Dias com venda no mês', `${sellingDays(vendorId)} de ${daysInMonth()}`)}
+      ${kpi('Dias com venda no mês', `${sellingDays(vendorId)} de ${workingDays}`)}
       ${kpi('Média por dia vendido', money(averagePerSellingDay(vendorId)))}
     </div>
-    ${evolutionChart(goal, [vendorId], next ? next.alvo : topTierTarget(goal), next ? `Ritmo para ${TIER_LABEL[next.tier]}` : 'Ritmo do nível máximo')}
+    ${evolutionChart(goal, [vendorId], next ? next.alvo : topTierTarget(goal, vendorId), next ? `Ritmo para ${TIER_LABEL[next.tier]}` : 'Ritmo do nível máximo', vendorId)}
   </div>`;
 }
 
@@ -214,10 +218,9 @@ function vendorHeroCard(goal) {
  * Faixa de "tempo sem vender": é o aviso mais acionável do painel, então fica
  * destacado e junto do quanto ainda precisa sair por dia até o fim do mês.
  */
-function idleStrip(vendorId, next) {
+function idleStrip(vendorId, next, left) {
   const idle = daysWithoutSelling(vendorId);
   const last = lastSaleDate(vendorId);
-  const left = daysLeftInMonth();
 
   let tone = 'ok';
   let headline;
@@ -232,7 +235,7 @@ function idleStrip(vendorId, next) {
   }
 
   const perDay = next && left > 0
-    ? `Para chegar no ${TIER_LABEL[next.tier]} faltam <b>${money(next.falta / left)}</b> por dia nos ${left} dia${left === 1 ? '' : 's'} restantes.`
+    ? `Para chegar no ${TIER_LABEL[next.tier]} faltam <b>${money(next.falta / left)}</b> por dia nos ${left} dia${left === 1 ? '' : 's'} de trabalho restantes.`
     : next
       ? `Faltam <b>${money(next.falta)}</b> para o ${TIER_LABEL[next.tier]}.`
       : 'Você já está no nível máximo do mês.';
@@ -255,12 +258,12 @@ function evolutionCard(goal) {
   </div>`;
 }
 
-function evolutionChart(goal, vendorIds, target, idealName) {
+function evolutionChart(goal, vendorIds, target, idealName, vendorId = null) {
   const labels = Array.from({ length: daysInMonth() }, (_, i) => String(i + 1));
   return lineChart({
     labels,
     series: [
-      { name: idealName, color: '#B9A16B', points: idealCumulativeByDay(target), dashed: true },
+      { name: idealName, color: '#B9A16B', points: idealCumulativeByDay(goal, target, vendorId), dashed: true },
       { name: 'Realizado acumulado', color: '#1F3A5F', points: cutAtToday(cumulativeByDay(vendorIds)), fill: true }
     ]
   });
@@ -270,15 +273,15 @@ function rankingCard(goal) {
   const vendors = goalVendors(goal);
   if (!vendors.length) return '';
 
-  const bronze = goal.niveis?.bronze ? Number(goal.niveis.bronze) : 0;
+  const first = availableTiers(goal)[0];
   const items = vendors
     .map(vendor => {
       const total = vendorTotal(vendor.id);
-      const tier = currentTier(goal, total);
+      const tier = currentTier(goal, total, vendor.id);
       return {
         label: vendor.name,
         value: total,
-        marker: bronze,
+        marker: first ? tierValue(goal, first, vendor.id) : 0,
         color: tier ? `var(--${tier})` : 'var(--muted)'
       };
     })
@@ -323,21 +326,27 @@ function idleCard(goal) {
 /* ------------------------------------------------------------------ */
 
 function tierGoalsCard(goal) {
-  const blocks = TIER_ORDER.map(tier => {
-    const value = goal.niveis?.[tier];
-    const available = value !== null && value !== undefined && value !== '';
-    const alvoPecas = monthPecasTarget(goal, tier);
+  // A vendedora vê as metas dela; o admin vê a meta de quem trabalha o mês inteiro.
+  const vendorId = isVendedora() ? myVendorId() : null;
+  const blocks = availableTiers(goal).map(tier => {
+    const alvoPecas = monthPecasTarget(goal, tier, vendorId);
     return `<div class="tier-goal-block" style="border-top-color:var(--${tier})">
       <div class="tg-name">${TIER_LABEL[tier]}</div>
-      <div class="tg-value ${available ? '' : 'unavailable'}">${available ? money(value) : 'Não vale neste mês'}</div>
+      <div class="tg-value">${money(tierValue(goal, tier, vendorId))}</div>
       ${alvoPecas ? `<div class="tg-pecas">${pecas(alvoPecas)}</div>` : ''}
-      <div class="tg-rate">Faixa de ${(RATES[tier] * 100).toFixed(1)}%</div>
-      ${available ? `<div class="tg-bonus"><span class="tg-bonus-label">Bonificação ao atingir</span>${money(tierBonus(goal, tier))}</div>` : ''}
+      <div class="tg-rate">Faixa de ${ratePct(tierRate(goal, tier))}</div>
+      <div class="tg-bonus"><span class="tg-bonus-label">Bonificação ao atingir</span>${money(tierBonus(goal, tier, vendorId))}</div>
     </div>`;
   }).join('');
 
+  const partial = goalVendors(goal).filter(vendor => workedDays(goal, vendor.id)).length;
+  const note = vendorId
+    ? workedDaysNote(goal, vendorId)
+    : partial ? `Valores de quem trabalha o mês inteiro. ${partial === 1 ? '1 vendedora tem' : `${partial} vendedoras têm`} dias parciais e metas proporcionais — veja no acompanhamento de cada uma.` : null;
+
   return `<div class="card">
     <h2>${isVendedora() ? 'Seus objetivos do mês' : 'Metas do mês — por vendedora'}</h2>
+    ${note ? `<p class="pacer-note days-note">${note}</p>` : ''}
     <div class="tier-goals-grid">${blocks}</div>
   </div>`;
 }
@@ -346,46 +355,67 @@ function tierGoalsCard(goal) {
 /* balizador semanal                                                   */
 /* ------------------------------------------------------------------ */
 
+// Chave usada em `state.selectedTier` para o balizador geral (não é de uma vendedora).
+const STORE_PACER = '__loja';
+
+/**
+ * Nível usado como referência num balizador: o que foi tocado ou, por padrão,
+ * o primeiro nível que vale no mês. `ownerId` é a vendedora ou STORE_PACER.
+ */
+function pacerTier(goal, ownerId) {
+  const tiers = availableTiers(goal);
+  const chosen = state.selectedTier[ownerId];
+  return tiers.includes(chosen) ? chosen : tiers[0] || null;
+}
+
+/** Botões de todos os níveis do mês; o tocado define os números das semanas. */
+function pacerPicker(goal, ownerId) {
+  const reference = pacerTier(goal, ownerId);
+  const buttons = availableTiers(goal).map(tier => `<button class="pacer-tier-btn${tier === reference ? ' active' : ''}"
+    style="--tier-color:var(--${tier})" data-action="selectPacerTier" data-owner-id="${ownerId}" data-tier="${tier}">${TIER_LABEL[tier]}</button>`).join('');
+  return `<div class="pacer-tier-picker"><span class="pacer-tier-hint">Balizador:</span>${buttons}</div>`;
+}
+
 function pacerCard(goal) {
-  const weeks = currentWeeks();
-  const targetsByTier = Object.fromEntries(TIER_ORDER.map(tier => [tier, weeklyTargets(goal, tier)]));
+  if (!availableTiers(goal).length) return '';
+  // A vendedora vê o balizador com as metas dela (proporcionais se ela folga).
+  const ownVendorId = isVendedora() ? myVendorId() : null;
+  const reference = pacerTier(goal, STORE_PACER);
+  const targets = weeklyTargets(goal, reference, ownVendorId);
+  const weeks = currentWeeks(goal);
+  const weightsLabel = weeks.map(week => String(week.weight).replace('.', ',')).join('-');
 
   const rows = weeks.map(week => {
+    const cell = targets[week.idx];
     const isOpen = state.openPacerWeeks.has(week.idx);
     let html = `<div class="week-item${isOpen ? ' open' : ''}">
       <button class="week-header" data-action="togglePacerWeek" data-week="${week.idx}">
         <span>${week.label}<span class="week-range">${week.periodo}</span></span>
-        <span class="week-header-right"><span class="week-weight">peso ${week.weight}</span><span class="chevron">▶</span></span>
+        <span class="week-header-right">
+          <span class="week-sold">${moneyRound(cell.rs)}</span>
+          <span class="week-weight">peso ${String(week.weight).replace('.', ',')}</span><span class="chevron">▶</span>
+        </span>
       </button>`;
 
     if (isOpen) {
-      html += '<div class="week-body"><div class="week-tier-grid">';
-      TIER_ORDER.forEach(tier => {
-        const cell = targetsByTier[tier][week.idx];
-        if (!cell || cell.rs === null) {
-          html += `<div class="week-tier-block wtb-na"><div class="wtb-name">${TIER_LABEL[tier]}</div><div class="wtb-value">—</div></div>`;
-          return;
-        }
-        html += `<div class="week-tier-block" style="border-top-color:var(--${tier})">
-          <div class="wtb-name">${TIER_LABEL[tier]}</div>
+      html += `<div class="week-body"><div class="week-tier-grid">
+        <div class="week-tier-block" style="border-top-color:var(--${reference})">
+          <div class="wtb-name">${TIER_LABEL[reference]}</div>
           <div class="wtb-value">${moneyRound(cell.rs)}</div>
           ${cell.pecas !== null ? `<div class="wtb-pecas">${cell.pecas} peças</div>` : ''}
-        </div>`;
-      });
-      html += '</div></div>';
+        </div>
+      </div></div>`;
     }
     return html + '</div>';
   }).join('');
 
-  const totals = TIER_ORDER
-    .map(tier => `<span>${TIER_LABEL[tier]}: <b>${goal.niveis?.[tier] ? moneyRound(goal.niveis[tier]) : '—'}</b></span>`)
-    .join('');
-
   return `<div class="card">
     <h2>Balizador semanal — por vendedora</h2>
-    <p class="pacer-note">Semanas reais de calendário (domingo a sábado). A primeira e a última pesam 1 e as do meio pesam 2, então semanas quebradas exigem menos.</p>
+    <p class="pacer-note">Semanas reais de calendário (domingo a sábado), com pesos ${weightsLabel}: semana de peso 2 pede o dobro de uma de peso 1.${isAdmin() ? ' Os pesos podem ser alterados em Editar meta ou na aba Equipe.' : ''}</p>
+    ${ownVendorId && workedDaysNote(goal, ownVendorId) ? `<p class="pacer-note days-note">${workedDaysNote(goal, ownVendorId)}</p>` : ''}
+    ${pacerPicker(goal, STORE_PACER)}
     <div class="week-accordion">${rows}</div>
-    <div class="week-monthly-total">${totals}</div>
+    <div class="week-monthly-total"><span>Meta do mês no ${TIER_LABEL[reference]}: <b>${moneyRound(tierValue(goal, reference, ownVendorId))}</b></span></div>
   </div>`;
 }
 
@@ -414,18 +444,19 @@ function vendorsAccordion(goal) {
 
 function vendorItem(goal, vendor) {
   const total = vendorTotal(vendor.id);
-  const top = topTierTarget(goal) || total || 1;
-  const tier = currentTier(goal, total);
-  const next = nextTierInfo(goal, total);
+  const top = topTierTarget(goal, vendor.id) || total || 1;
+  const tier = currentTier(goal, total, vendor.id);
+  const next = nextTierInfo(goal, total, vendor.id);
   const isOpen = isVendedora() || state.openVendorId === vendor.id;
+  const daysNote = workedDaysNote(goal, vendor.id);
 
   const marks = availableTiers(goal).map(t => {
-    const left = Math.min((Number(goal.niveis[t]) / top) * 100, 100);
+    const left = Math.min((tierValue(goal, t, vendor.id) / top) * 100, 100);
     return `<div class="tier-mark tier-mark-${t}" style="left:${left}%" data-action="selectTier" data-vendor-id="${vendor.id}" data-tier="${t}"></div>`;
   }).join('');
 
   const labels = availableTiers(goal).map(t => {
-    const left = Math.min((Number(goal.niveis[t]) / top) * 100, 100);
+    const left = Math.min((tierValue(goal, t, vendor.id) / top) * 100, 100);
     const active = state.selectedTier[vendor.id] === t;
     return `<span class="tier-label-item${active ? ' active' : ''}" style="left:${left}%"
       data-action="selectTier" data-vendor-id="${vendor.id}" data-tier="${t}">${TIER_LABEL[t]}</span>`;
@@ -433,12 +464,12 @@ function vendorItem(goal, vendor) {
 
   const badge = tier
     ? `<span class="tier-badge b-${tier}">${TIER_LABEL[tier]}</span>`
-    : '<span class="tier-badge b-none">Abaixo do Bronze</span>';
+    : `<span class="tier-badge b-none">${belowFirstTierLabel(goal)}</span>`;
 
   const chosen = state.selectedTier[vendor.id];
   let status;
-  if (chosen && goal.niveis?.[chosen] != null) {
-    const diff = Number(goal.niveis[chosen]) - total;
+  if (chosen && tierValue(goal, chosen) !== null) {
+    const diff = tierValue(goal, chosen, vendor.id) - total;
     status = diff > 0
       ? `${badge} faltam <b>${money(diff)}</b> para ${TIER_LABEL[chosen]} <span class="vaccordion-hint">(toque de novo para voltar ao automático)</span>`
       : `${badge} já bateu ${TIER_LABEL[chosen]} — excedente de <b>${money(-diff)}</b>`;
@@ -450,11 +481,12 @@ function vendorItem(goal, vendor) {
 
   return `<div class="vaccordion-item${isOpen ? ' open' : ''}">
     <button class="vaccordion-header" data-action="toggleVendor" data-vendor-id="${vendor.id}">
-      <span>${esc(vendor.name)}</span>
+      <span>${esc(vendor.name)}${daysNote ? ' <span class="days-chip">dias parciais</span>' : ''}</span>
       <span class="vaccordion-hint">${money(total)} ${tier ? `<span class="tier-dot tier-mark-${tier}"></span>` : ''}<span class="chevron">▶</span></span>
     </button>
     ${isOpen ? `<div class="vaccordion-body">
       <div class="vtotal">Vendido no mês: <b>${money(total)}</b> · ${pecas(vendorPecas(vendor.id))} · ${idleLabel(vendor.id)}</div>
+      ${daysNote ? `<div class="pacer-note days-note">${daysNote}</div>` : ''}
       <div class="tier-track">
         <div class="tier-fill" style="width:${Math.min((total / top) * 100, 100)}%"></div>
         <div class="tier-marks">${marks}</div>
@@ -462,7 +494,7 @@ function vendorItem(goal, vendor) {
       <div class="tier-labels">${labels}</div>
       <div class="tier-status">${status}</div>
       <div class="commission-line">
-        <span>Bonificação a receber ${tier ? `(${TIER_LABEL[tier]} · faixa de ${(RATES[tier] * 100).toFixed(1)}%)` : '(nenhum nível ainda)'}</span>
+        <span>Bonificação a receber ${tier ? `(${TIER_LABEL[tier]} · faixa de ${ratePct(tierRate(goal, tier))})` : '(nenhum nível ainda)'}</span>
         <b>${money(vendorBonus(goal, vendor.id))}</b>
       </div>
       <div class="pacer-note">Valor fixo da faixa atingida — não aumenta se vender mais dentro do mesmo nível.</div>
@@ -480,41 +512,45 @@ function idleLabel(vendorId) {
 }
 
 function vendorPacer(goal, vendorId) {
-  const targets = weeklyTargets(goal, 'bronze');
-  const rows = currentWeeks().map(week => {
-    const sold = vendorWeekTotal(vendorId, week);
-    const target = targets[week.idx]?.rs;
-    const hit = target !== null && sold >= target;
-    const isOpen = state.openVendorPacerWeeks.has(week.idx);
+  if (!availableTiers(goal).length) return '';
 
-    let html = `<div class="week-item${isOpen ? ' open' : ''}">
+  const reference = pacerTier(goal, vendorId);
+  const targets = weeklyTargets(goal, reference, vendorId);
+
+  const rows = currentWeeks(goal).map(week => {
+    const sold = vendorWeekTotal(vendorId, week);
+    const cell = targets[week.idx];
+    const target = cell?.rs;
+    const off = cell && cell.worked === 0;
+    const hit = !off && target !== null && sold >= target;
+    const isOpen = state.openVendorPacerWeeks.has(week.idx);
+    const partialWeek = cell && cell.worked > 0 && cell.worked < cell.days
+      ? `<span class="week-range">${cell.worked} de ${cell.days} dias</span>` : '';
+
+    let html = `<div class="week-item${isOpen ? ' open' : ''}${off ? ' week-off' : ''}">
       <button class="week-header" data-action="toggleVendorWeek" data-week="${week.idx}">
-        <span>${week.label}<span class="week-range">${week.periodo}</span></span>
+        <span>${week.label}<span class="week-range">${week.periodo}</span>${partialWeek}</span>
         <span class="week-header-right">
-          <span class="week-sold">${money(sold)}</span>
-          ${hit ? '<span class="week-hit-dot" title="Bateu o ritmo do Bronze"></span>' : ''}
+          <span class="week-sold">${off ? `${sold ? money(sold) + ' · ' : ''}folga` : `${money(sold)}${target !== null ? ` de ${moneyRound(target)}` : ''}`}</span>
+          ${hit ? `<span class="week-hit-dot" title="Bateu o ritmo do ${TIER_LABEL[reference]}"></span>` : ''}
           <span class="chevron">▶</span>
         </span>
       </button>`;
 
     if (isOpen) {
-      html += '<div class="week-body"><table class="pacer-mini"><tbody>';
-      TIER_ORDER.forEach(tier => {
-        const cell = weeklyTargets(goal, tier)[week.idx];
-        if (!cell || cell.rs === null) {
-          html += `<tr><td><span class="tier-badge b-none">${TIER_LABEL[tier]}</span></td><td class="pc-na">—</td></tr>`;
-          return;
-        }
-        html += `<tr class="${sold >= cell.rs ? 'pacer-hit' : ''}">
-          <td><span class="tier-badge b-${tier}">${TIER_LABEL[tier]}</span></td>
-          <td>${moneyRound(cell.rs)}${cell.pecas !== null ? ` · ${pecas(cell.pecas)}` : ''}</td></tr>`;
-      });
-      html += '</tbody></table></div>';
+      html += `<div class="week-body"><table class="pacer-mini"><tbody>
+        <tr class="${hit ? 'pacer-hit' : ''}">
+          <td><span class="tier-badge b-${reference}">${TIER_LABEL[reference]}</span></td>
+          <td>${moneyRound(cell.rs)}${cell.pecas !== null ? ` · ${pecas(cell.pecas)}` : ''}</td>
+        </tr>
+      </tbody></table></div>`;
     }
     return html + '</div>';
   }).join('');
 
-  return `<div class="mini-title">Balizador semanal</div><div class="week-accordion">${rows}</div>`;
+  return `<div class="mini-title">Balizador semanal</div>
+    ${pacerPicker(goal, vendorId)}
+    <div class="week-accordion">${rows}</div>`;
 }
 
 function salesTable(vendorId) {
@@ -626,6 +662,12 @@ onClick({
     const selected = { ...state.selectedTier };
     selected[vendorId] = selected[vendorId] === tier ? null : tier;
     setState({ selectedTier: selected });
+  },
+
+  // Diferente do selectTier da régua, aqui tocar de novo não desmarca: o
+  // balizador sempre mostra um nível.
+  selectPacerTier({ ownerId, tier }) {
+    setState({ selectedTier: { ...state.selectedTier, [ownerId]: tier } });
   },
 
   togglePacerWeek({ week }) {

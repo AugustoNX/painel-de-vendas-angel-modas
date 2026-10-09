@@ -148,7 +148,7 @@ function progressToast({ amount, before, vendorId, period }) {
     ? ` Lançada em ${MONTH_NAMES[monthIdx]} — abra esse mês para ver.`
     : '';
   const goal = state.goals[period];
-  const next = goal ? nextTierInfo(goal, after) : null;
+  const next = goal ? nextTierInfo(goal, after, vendorId) : null;
 
   if (!goal) return `Venda de ${money(amount)} salva${who}.${otherMonth}`;
 

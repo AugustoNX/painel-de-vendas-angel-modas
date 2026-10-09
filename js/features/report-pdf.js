@@ -1,9 +1,9 @@
 import { state, currentGoal } from '../core/store.js';
-import { MONTH_NAMES, TIER_ORDER, TIER_LABEL, RATES } from '../config/constants.js';
+import { MONTH_NAMES, TIER_ORDER, TIER_LABEL } from '../config/constants.js';
 import { showToast } from '../ui/toast.js';
-import { money } from '../ui/format.js';
+import { money, ratePct } from '../ui/format.js';
 import {
-  goalVendors, extraVendors, vendorTotal, vendorPecas, currentTier, tierBonus, storeSummary
+  goalVendors, extraVendors, vendorTotal, vendorPecas, currentTier, tierBonus, storeSummary, tierValue, tierRate, belowFirstTierLabel, workedDays
 } from '../domain/metas.js';
 
 const NAVY = [31, 58, 95];
@@ -57,12 +57,12 @@ export function exportCommissionPdf() {
     styles: { fontSize: 10 },
     head: [['Nível', 'Meta por vendedora', 'Faixa', 'Bonificação ao atingir']],
     body: TIER_ORDER.map(tier => {
-      const value = goal.niveis?.[tier];
+      const value = tierValue(goal, tier);
       const available = value !== null && value !== undefined && value !== '';
       return [
         TIER_LABEL[tier],
         available ? money(value) : 'não vale neste mês',
-        `${(RATES[tier] * 100).toFixed(1)}%`,
+        ratePct(tierRate(goal, tier)),
         available ? money(tierBonus(goal, tier)) : '—'
       ];
     })
@@ -80,17 +80,18 @@ export function exportCommissionPdf() {
   goalVendors(goal).forEach(vendor => {
     const total = vendorTotal(vendor.id);
     const qtd = vendorPecas(vendor.id);
-    const tier = currentTier(goal, total);
-    const bonus = tierBonus(goal, tier);
+    const tier = currentTier(goal, total, vendor.id);
+    const bonus = tierBonus(goal, tier, vendor.id);
+    const dias = workedDays(goal, vendor.id);
     totalVendido += total;
     totalPecas += qtd;
     totalBonus += bonus;
     rows.push([
-      vendor.name,
+      dias ? `${vendor.name} (${dias.length} dias)` : vendor.name,
       money(total),
       String(qtd),
-      tier ? TIER_LABEL[tier] : 'Abaixo do Bronze',
-      tier ? `${(RATES[tier] * 100).toFixed(1)}%` : '—',
+      tier ? TIER_LABEL[tier] : belowFirstTierLabel(goal),
+      tier ? ratePct(tierRate(goal, tier)) : '—',
       money(bonus)
     ]);
   });

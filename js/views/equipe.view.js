@@ -1,15 +1,17 @@
 import { state, setState } from '../core/store.js';
-import { MONTH_NAMES, TIER_ORDER, TIER_LABEL, ROLE } from '../config/constants.js';
+import { MONTH_NAMES, TIER_LABEL, ROLE } from '../config/constants.js';
 import { session } from '../core/session.js';
 import { $ } from '../ui/dom.js';
-import { onClick } from '../ui/actions.js';
+import { onClick, onInput, onChange } from '../ui/actions.js';
 import { showToast } from '../ui/toast.js';
 import { confirmModal } from '../ui/modal.js';
 import { money, pecas, esc } from '../ui/format.js';
 import { lineChart, barChart } from '../ui/charts.js';
-import { metaVendors, extraVendors, vendorName } from '../domain/metas.js';
-import { RATES } from '../config/constants.js';
+import { metaVendors, extraVendors, vendorName, knownYears, publishedGoal, currentTier, tierBonus } from '../domain/metas.js';
 import { updateVendor } from '../data/vendors.repo.js';
+import { patchGoal } from '../data/goals.repo.js';
+import { openGoalModal } from './modals/goal.modal.js';
+import { scaleFieldsHtml, tierFieldsHtml, weekWeightsHtml, monthConfigAttr, readMonthConfig, validateMonthConfig } from './components/month-config.js';
 import { revokeUser } from '../data/users.repo.js';
 import { listSales } from '../data/sales.repo.js';
 import { openVendorModal } from './modals/vendor.modal.js';
@@ -22,7 +24,8 @@ let analysisLoading = false;
 export function renderEquipe() {
   const el = $('viewEquipe');
   if (!el) return;
-  el.innerHTML = vendorsSection() + usersSection() + analysisSection();
+  const draft = monthConfigDraft();
+  el.innerHTML = vendorsSection() + monthConfigSection(draft) + usersSection() + analysisSection();
 }
 
 /* ------------------------------------------------------------------ */
@@ -61,6 +64,92 @@ function vendorsSection() {
       <tbody>${rows}</tbody></table>`
       : '<div class="empty-state">Nenhuma vendedora cadastrada. Comece criando a equipe.</div>'}
   </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* configuração do mês                                                 */
+/* ------------------------------------------------------------------ */
+
+// Mês escolhido nesta seção. Independe do mês da aba de vendas.
+let configPeriod = null;
+
+function selectedConfigPeriod() {
+  if (!configPeriod) configPeriod = { year: state.year, month: state.month };
+  return configPeriod;
+}
+
+function configKey({ year, month }) {
+  return `${year}-${String(month + 1).padStart(2, '0')}`;
+}
+
+/**
+ * A tela inteira é redesenhada a cada atualização do Firebase. Se o admin
+ * estiver no meio da edição, o que já foi digitado é lido de volta e mantido.
+ */
+function monthConfigDraft() {
+  const form = $('monthConfig');
+  if (!form || form.dataset.dirty !== '1' || form.dataset.key !== configKey(selectedConfigPeriod())) return null;
+  return readMonthConfig(form);
+}
+
+function monthConfigSection(draft) {
+  const period = selectedConfigPeriod();
+  const key = configKey(period);
+  const stored = state.goals[key] || null;
+  const goal = draft || stored;
+  const published = publishedGoal(stored);
+  const label = `${MONTH_NAMES[period.month]}/${period.year}`;
+
+  const options = knownYears().map(year => `<optgroup label="${year}">
+    ${MONTH_NAMES.map((name, idx) => {
+      const value = `${year}-${idx}`;
+      const selected = year === period.year && idx === period.month ? 'selected' : '';
+      return `<option value="${value}" ${selected}>${name}/${year}</option>`;
+    }).join('')}
+  </optgroup>`).join('');
+
+  const status = published
+    ? `Objetivo da loja em ${label}: <b>${money(published.obj)}</b>. Os valores em R$ também podem ser ajustados aqui.`
+    : `${label} ainda não tem objetivo da loja. A escala e os níveis ficam guardados e passam a valer quando a meta for definida.`;
+
+  return `<div class="card month-config" id="monthConfig" data-key="${key}" data-dirty="${draft ? '1' : '0'}" data-input-action="monthConfigDirty" ${monthConfigAttr(key)}>
+    <div class="store-card-header">
+      <h2>Escala, dias e metas do mês</h2>
+      <div class="store-card-header-right field">
+        <select aria-label="Mês" data-change-action="monthConfigPeriod">${options}</select>
+      </div>
+    </div>
+    <p class="pacer-note">${status}</p>
+
+    <div class="mini-title">Vendedoras na escala e dias trabalhados</div>
+    ${scaleFieldsHtml(goal, key)}
+
+    <div class="mini-title">Níveis de meta e bonificação</div>
+    ${tierFieldsHtml(goal)}
+    <div class="field-hint">Desmarque os níveis que não valem no mês. O % é aplicado sobre a meta do nível atingido. A meta é de quem trabalha o mês inteiro.</div>
+
+    <div class="mini-title">Peso das semanas</div>
+    ${weekWeightsHtml(goal, key)}
+
+    <div class="month-config-actions">
+      <button class="ghost-btn" data-action="openMonthGoal">${published ? 'Abrir meta completa' : `Definir objetivo de ${label}`}</button>
+      <button class="crm-add-btn" data-action="saveMonthConfig">Salvar ${label}</button>
+    </div>
+  </div>`;
+}
+
+async function saveMonthConfig() {
+  const form = $('monthConfig');
+  const key = form.dataset.key;
+  const config = readMonthConfig(form);
+  const published = publishedGoal(state.goals[key]);
+  const problem = validateMonthConfig(config, { requireValues: !!published });
+  if (problem) { showToast(problem); return; }
+
+  form.dataset.dirty = '0';
+  await patchGoal(key, config);
+  const { year, month } = selectedConfigPeriod();
+  showToast(`Configuração de ${MONTH_NAMES[month]}/${year} salva`);
 }
 
 /* ------------------------------------------------------------------ */
@@ -168,7 +257,7 @@ async function loadYearAnalysis() {
 
   for (let monthIdx = 0; monthIdx < 12; monthIdx++) {
     const key = `${state.year}-${String(monthIdx + 1).padStart(2, '0')}`;
-    const goal = state.goals[key] || null;
+    const goal = publishedGoal(state.goals[key]);
     const sales = await listSales(key);
     if (!goal && !sales.length) continue;
 
@@ -193,15 +282,11 @@ async function loadYearAnalysis() {
       row.total += sold;
       row.pecas += month.byVendor[vendor.id]?.pecas || 0;
 
-      if (!month.goal?.niveis) return;
-      let reached = null;
-      TIER_ORDER.forEach(tier => {
-        const target = month.goal.niveis[tier];
-        if (target != null && sold >= Number(target)) reached = tier;
-      });
+      if (!month.goal) return;
+      const reached = currentTier(month.goal, sold, vendor.id);
       if (reached) {
         row.metasBatidas++;
-        row.bonus += Number(month.goal.niveis[reached]) * RATES[reached];
+        row.bonus += tierBonus(month.goal, reached, vendor.id);
         if (!row.tiers.includes(reached)) row.tiers.push(reached);
       }
     });
@@ -244,5 +329,25 @@ onClick({
     });
   },
 
-  loadYearAnalysis() { return loadYearAnalysis(); }
+  loadYearAnalysis() { return loadYearAnalysis(); },
+
+  saveMonthConfig() { return saveMonthConfig(); },
+
+  openMonthGoal() {
+    $('monthConfig').dataset.dirty = '0';
+    const { year, month } = selectedConfigPeriod();
+    openGoalModal(year, month);
+  }
+});
+
+onInput({
+  monthConfigDirty(_data, el) { el.dataset.dirty = '1'; }
+});
+
+onChange({
+  monthConfigPeriod(_data, el) {
+    const [year, month] = el.value.split('-').map(Number);
+    configPeriod = { year, month };
+    setState({});
+  }
 });

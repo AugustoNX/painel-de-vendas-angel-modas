@@ -22,6 +22,12 @@ export function pct(n) {
   return Math.round(n) + '%';
 }
 
+/** Taxa em fração -> '1,5%' */
+export function ratePct(rate) {
+  if (rate === null || rate === undefined || isNaN(rate)) return '—';
+  return (Number(rate) * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 }) + '%';
+}
+
 /** '2026-07-15' -> '15/07/2026' */
 export function dateBr(iso) {
   if (!iso) return '—';

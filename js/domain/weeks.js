@@ -29,12 +29,27 @@ export function monthWeeks(year, monthIdx) {
 }
 
 /**
+ * Troca o peso padrão pelo que o admin definiu no mês (`pesos[idx]`). Peso
+ * vazio ou inválido mantém o padrão.
+ */
+export function withWeights(weeks, pesos) {
+  if (!Array.isArray(pesos)) return weeks;
+  return weeks.map(week => {
+    const custom = Number(pesos[week.idx]);
+    return pesos[week.idx] !== null && pesos[week.idx] !== undefined && pesos[week.idx] !== '' && custom >= 0 && !isNaN(custom)
+      ? { ...week, weight: custom }
+      : week;
+  });
+}
+
+/**
  * Distribui um total mensal pelas semanas conforme o peso de cada uma,
  * corrigindo o arredondamento para que a soma feche exatamente com o total.
  */
 export function splitByWeek(total, weeks) {
   if (!total || !weeks.length) return weeks.map(() => 0);
   const totalWeight = weeks.reduce((sum, week) => sum + week.weight, 0);
+  if (!totalWeight) return weeks.map(() => 0);
   const values = weeks.map(week => Math.round(total * week.weight / totalWeight));
   const drift = Math.round(total) - values.reduce((sum, value) => sum + value, 0);
   if (drift !== 0) {

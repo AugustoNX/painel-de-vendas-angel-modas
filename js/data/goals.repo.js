@@ -7,11 +7,18 @@ import { session } from '../core/session.js';
  * a partir das semanas reais do calendário (ver domain/weeks.js).
  *
  * { obj, campanhaAlvo, campanhaRealizado, precoMedioPeca,
- *   niveis: { bronze, prata, ouro, diamante },   // null = nível não vale nesse mês
- *   vendorIds: [ids das vendedoras que participam da meta] }
+ *   niveis: { bronze, prata, ouro, diamante },   // meta por vendedora de mês inteiro
+ *   niveisAtivos: { bronze: true, ... },          // false = nível não vale nesse mês
+ *   taxas: { bronze: 0.01, ... },                 // % de bonificação de cada nível
+ *   vendorIds: [ids das vendedoras que participam da meta],
+ *   diasTrabalhados: { vendorId: [dias do mês] }, // ausente = trabalha o mês inteiro
+ *   pesosSemanas: [1, 2, 2, 2, 1] }               // ausente = peso padrão das semanas
  */
 export function watchGoals(onChange) {
-  return watchValue(DB_PATHS.goals, value => onChange(value || {}));
+  // `periodKey` não é gravado: só deixa cada meta saber de qual mês ela é.
+  return watchValue(DB_PATHS.goals, value => onChange(Object.fromEntries(
+    Object.entries(value || {}).map(([key, goal]) => [key, { ...goal, periodKey: key }])
+  )));
 }
 
 export function saveGoal(periodKey, goal) {

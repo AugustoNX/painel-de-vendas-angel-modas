@@ -74,5 +74,6 @@ export function periodKey(year = state.year, month = state.month) {
 }
 
 export function currentGoal() {
-  return state.goals[periodKey()] || null;
+  const goal = state.goals[periodKey()];
+  return goal && Number(goal.obj) > 0 ? goal : null;
 }

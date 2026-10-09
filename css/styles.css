@@ -289,6 +289,11 @@
   table.pacer-mini tr.pacer-hit td:last-child{color:var(--ok); font-weight:700;}
   table.pacer-mini td:last-child{text-align:right; font-weight:600;}
   table.pacer-mini td.pc-na{color:var(--muted); font-weight:500; font-size:11.5px;}
+  .pacer-tier-picker{display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:8px;}
+  .pacer-tier-hint{font-size:11.5px; color:var(--muted); font-weight:600;}
+  .pacer-tier-btn{border:2px solid var(--tier-color); background:var(--card); color:var(--tier-color); border-radius:999px; padding:4px 14px; font-size:12px; font-weight:700; cursor:pointer; font-family:inherit;}
+  .pacer-tier-btn.active{background:var(--tier-color); color:#fff;}
+  .pacer-tier-btn:not(.active):hover{background:#F6F3EC;}
   .week-monthly-total{
     margin-top:10px; padding-top:10px; border-top:1px dashed var(--line);
     display:flex; flex-wrap:wrap; gap:10px 16px; font-size:11.5px; color:var(--muted);
@@ -699,6 +704,13 @@
   .goal-row{display:grid; grid-template-columns:repeat(auto-fit, minmax(170px,1fr)); gap:10px;}
   .tier-inputs{display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:10px;}
   .tier-input{border-top:4px solid var(--line); border-radius:10px; padding:10px; background:#FBFAF7;}
+  .tier-input .tier-toggle{font-weight:700; padding:0 0 4px 0;}
+  .tier-input .tier-toggle input{min-width:0; width:auto; padding:0;}
+  .tier-input .tier-field-label{display:flex; flex-direction:column; gap:4px; font-size:11px; color:var(--muted); font-weight:600;}
+  .tier-input.tier-off{opacity:.55;}
+  .month-config .tier-inputs{margin-bottom:6px;}
+  .month-config .store-card-header-right select{min-width:170px;}
+  .month-config-actions{display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap; margin-top:16px;}
   .goal-preview{font-size:12px;}
   .preview-line{color:var(--muted); margin-bottom:10px; line-height:1.6;}
   .preview-line b{color:var(--ink);}
@@ -748,3 +760,35 @@
     .health-data{text-align:left;}
     .attention-row .ar-action{text-align:left; max-width:none;}
   }
+
+  /* --- escala: dias trabalhados por vendedora --- */
+  .scale-list{display:flex; flex-direction:column; gap:6px;}
+  .scale-vendor{border:1px solid var(--line); border-radius:10px; background:#FBFAF7;}
+  .scale-vendor.open{border-color:var(--accent);}
+  .scale-vendor-row{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:2px 10px; flex-wrap:wrap;}
+  .days-toggle{border:none; background:none; cursor:pointer; font-family:inherit; display:flex; align-items:center; gap:8px; padding:6px 0; font-size:12px;}
+  .mc-days-summary{color:var(--muted); font-weight:600;}
+  .days-toggle-cta{color:var(--accent); font-weight:700; text-decoration:underline;}
+  .days-panel{display:none; padding:4px 10px 12px 10px; border-top:1px solid var(--line);}
+  .scale-vendor.open .days-panel{display:block;}
+  .days-range{display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:12.5px; color:var(--muted); margin:8px 0;}
+  .days-range input[type=number]{width:58px; min-width:0; padding:6px; border:1px solid var(--line); border-radius:8px; font-family:inherit; font-size:13px;}
+  .days-calendar{display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); gap:4px; max-width:360px; margin-bottom:6px;}
+  .day-head{font-size:10.5px; font-weight:700; color:var(--muted); text-align:center; padding:2px 0;}
+  .day-cell{position:relative; cursor:pointer; display:block;}
+  .day-cell input{position:absolute; opacity:0; pointer-events:none;}
+  .day-cell span{display:block; text-align:center; padding:7px 0; border-radius:8px; font-size:12.5px; font-weight:600;
+    background:#EFECE5; color:var(--muted); text-decoration:line-through; user-select:none;}
+  .day-cell input:checked + span{background:var(--accent); color:#fff; text-decoration:none;}
+  .day-cell input:focus-visible + span{outline:2px solid var(--accent); outline-offset:2px;}
+  .day-cell.sunday input:checked + span{background:#3B5A80;}
+  .days-note{color:var(--accent); font-weight:600;}
+  .days-chip{font-size:10.5px; font-weight:700; color:var(--accent); background:rgba(31,58,95,.08); padding:2px 8px; border-radius:999px; margin-left:6px;}
+  .week-item.week-off .week-sold{color:var(--muted); font-style:italic;}
+
+  /* --- peso das semanas --- */
+  .week-weights{display:grid; grid-template-columns:repeat(auto-fit, minmax(118px, 1fr)); gap:8px;}
+  .week-weight-field{display:flex; flex-direction:column; gap:2px; border:1px solid var(--line); border-radius:10px; padding:8px 10px; background:#FBFAF7;}
+  .wwf-name{font-size:12px; font-weight:700; color:var(--ink);}
+  .wwf-range{font-size:10.5px; color:var(--muted);}
+  .week-weight-field input{margin-top:4px; padding:7px 8px; border:1px solid var(--line); border-radius:8px; font-family:inherit; font-size:14px; text-align:center; width:100%; min-width:0;}
